@@ -31,11 +31,14 @@ export default function LoginForm() {
   return (
     <main className="grid min-h-screen place-items-center p-4">
       <form onSubmit={submit} className="adm-in w-full max-w-[400px] rounded-[28px] bg-white p-6 shadow-[0_1px_3px_rgba(15,23,42,.06),0_20px_50px_-20px_rgba(15,23,42,.25)] sm:p-8">
-        <svg width="44" height="44" viewBox="0 0 32 32" aria-hidden="true">
-          <path d="M17 3c-1 6-4 10-8 14M17 3c2 5 5 9 8 11" stroke="#6b8f3a" strokeWidth="2" fill="none" strokeLinecap="round" />
-          <path d="M17 3c3-1 6 0 8 2-3 1-6 0-8-2z" fill="#8fae55" />
-          <circle cx="9" cy="22" r="6.5" fill="#d7263d" />
-          <circle cx="23" cy="20" r="6.5" fill="#b81d33" />
+        <svg width="52" height="52" viewBox="0 0 48 48" aria-hidden="true">
+          <path d="M5 21 24 6l19 15z" fill="#f2b04a" />
+          <path d="M5 21h38l-3 5H8z" fill="#e8c48a" />
+          <path d="M7 26c4 3 6-1 9 1s5-2 8 0 5-2 8 0 4 1 6-1v3H7z" fill="#6fbf3f" />
+          <path d="M7 29h34v3H7z" fill="#e03a1e" />
+          <path d="M7 32h34v3H7z" fill="#ffd45a" />
+          <path d="M5 35h38l-4 7H9z" fill="#f2b04a" />
+          <path d="M9 38h30" stroke="#c9852a" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
         <h1 className="adm-title mt-4 text-[28px] leading-none text-slate-900 sm:text-[32px]">Sign in</h1>
         <p className="mt-1 text-[14px] text-slate-500">8:2's chayakkada · orders &amp; billing</p>

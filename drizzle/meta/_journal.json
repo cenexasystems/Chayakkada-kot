@@ -57,6 +57,13 @@
       "when": 1791500100000,
       "tag": "0007_settings_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791500200000,
+      "tag": "0008_ingredients_tables",
+      "breakpoints": true
     }
   ]
 }
