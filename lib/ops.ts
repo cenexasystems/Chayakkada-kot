@@ -768,7 +768,15 @@ export function adminOp(op: string, a: Args) {
             patch[k] = v;
           }
         }
-        for (const k of ["mapsUrl", "logoUrl"] as const) {
+        if (a.logoUrl !== undefined) {
+          const v = typeof a.logoUrl === "string" ? a.logoUrl.trim() : "";
+          const isUpload = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v);
+          if (v && !isUpload && !/^https?:\/\/[^\s/]+/i.test(v)) throw new ApiError("Logo should be a PNG/JPG file or an http(s) link.");
+          if (isUpload && v.length > 150_000) throw new ApiError("That logo image is too large — pick a smaller one.");
+          if (!isUpload && v.length > 500) throw new ApiError("That logo link is too long.");
+          patch.logoUrl = v;
+        }
+        for (const k of ["mapsUrl"] as const) {
           if (a[k] !== undefined) {
             const v = str(a[k], 500);
             if (v && !/^https?:\/\/[^\s/]+/i.test(v)) throw new ApiError("Links should start with http:// or https://");

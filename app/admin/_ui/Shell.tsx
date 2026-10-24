@@ -73,6 +73,30 @@ function Settings({ onClose }: { onClose: () => void }) {
   });
   const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [k]: e.target.value });
+  /* Shrink a picked PNG/JPG to at most 160px in the browser and keep it as a small
+     data URL, so the logo needs no file storage and stays well under the size limit. */
+  const pickLogo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!/^image\/(png|jpeg)$/.test(f.type)) return toast({ kind: "err", title: "Choose a PNG or JPG image." });
+    const img = new Image();
+    const url = URL.createObjectURL(f);
+    img.onload = () => {
+      const k = Math.min(1, 160 / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(img.width * k));
+      c.height = Math.max(1, Math.round(img.height * k));
+      c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      setForm((cur) => ({ ...cur, logoUrl: c.toDataURL(f.type === "image/png" ? "image/png" : "image/jpeg", 0.85) }));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      toast({ kind: "err", title: "Couldn't read that image." });
+    };
+    img.src = url;
+  };
   const saveDetails = async () => {
     setSaving(true);
     const r = await act("settings.update", form);
@@ -96,7 +120,22 @@ function Settings({ onClose }: { onClose: () => void }) {
           <Field label="Customer service number"><input className={inputCls} inputMode="tel" value={form.customerCare} maxLength={30} onChange={set("customerCare")} /></Field>
           <Field label="Email"><input className={inputCls} type="email" value={form.email} maxLength={120} onChange={set("email")} /></Field>
           <Field label="Google Maps link"><input className={inputCls} value={form.mapsUrl} maxLength={500} onChange={set("mapsUrl")} placeholder="https://maps.app.goo.gl/…" /></Field>
-          <Field label="Logo image link" hint="Link to an image; blank uses the built-in icon"><input className={inputCls} value={form.logoUrl} maxLength={500} onChange={set("logoUrl")} placeholder="https://…" /></Field>
+          <Field label="Logo" hint="Upload a PNG or JPG, or paste an image link. Blank uses the built-in icon.">
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                {form.logoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={form.logoUrl} alt="Logo preview" className="h-12 w-12 rounded-lg border border-slate-200 object-cover" />
+                )}
+                <label className="inline-flex h-10 cursor-pointer items-center rounded-xl border border-slate-200 bg-white px-3.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50">
+                  Upload PNG / JPG
+                  <input type="file" accept="image/png,image/jpeg" className="sr-only" onChange={pickLogo} />
+                </label>
+                {form.logoUrl && <Btn kind="plain" onClick={() => setForm({ ...form, logoUrl: "" })}>Remove</Btn>}
+              </div>
+              <input className={inputCls} value={form.logoUrl.startsWith("data:") ? "" : form.logoUrl} maxLength={500} onChange={set("logoUrl")} placeholder={form.logoUrl.startsWith("data:") ? "Uploaded image in use" : "…or paste a link: https://…"} />
+            </div>
+          </Field>
           <Btn kind="red" onClick={saveDetails} disabled={saving}>{saving ? "Saving…" : "Save shop details"}</Btn>
         </div>
         <div className="flex items-start justify-between gap-4">
