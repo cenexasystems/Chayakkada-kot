@@ -1,0 +1,499 @@
+/* ==========================================================================
+   ADMIN — the counter's side of the shop: same charcoal · creamy white · tomato red
+   as the guest menu, laid out as a POS. Layout is Tailwind; this file holds
+   the palette, fonts, a few primitives and the print sheets.
+
+   The panel is painted by re-pointing Tailwind's own colour variables inside
+   `.adm` rather than by rewriting class names: in Tailwind v4 every utility
+   resolves to `var(--color-*)`, so `bg-white` / `text-slate-900` / `bg-red-600`
+   across the admin pick these up with no markup changes and no extra work at
+   runtime. Slate becomes the cocoa-and-sand ramp, red becomes cherry, and
+   white becomes the warm card the guest menu sits items on.
+   ========================================================================== */
+
+.adm {
+  /* neutrals: creamy white and charcoal, in place of Tailwind's cool grey */
+  --color-white: #fffdf9;
+  --color-slate-50: #faf5ec;
+  --color-slate-100: #f1e8d8;
+  --color-slate-200: #e2d5bd;
+  --color-slate-300: #c9b89b;
+  --color-slate-400: #a39482;
+  --color-slate-500: #82766a;
+  --color-slate-600: #655a50;
+  --color-slate-700: #4a413a;
+  --color-slate-800: #332d29;
+  --color-slate-900: #231f1c;
+  --color-slate-950: #171412;
+
+  /* the accent is tomato red */
+  --color-red-50: #fff0ec;
+  --color-red-100: #ffdcd3;
+  --color-red-200: #ffbfae;
+  --color-red-300: #ff9880;
+  --color-red-400: #f46a4d;
+  --color-red-500: #e9442a;
+  --color-red-600: #dc3414;
+  --color-red-700: #b82810;
+  --color-red-800: #931f0e;
+  --color-red-900: #741a0e;
+
+  /* golden yellow for anything that wants attention without alarm */
+  --color-amber-50: #fff9e0;
+  --color-amber-100: #fff0b3;
+  --color-amber-200: #ffe27a;
+  --color-amber-300: #ffd13d;
+  --color-amber-400: #ffbf14;
+  --color-amber-500: #f2a900;
+  --color-amber-600: #cc8600;
+  --color-amber-700: #9c6500;
+  --color-amber-900: #593a00;
+  --color-amber-950: #332000;
+
+  /* fresh green for the settled and the safe */
+  --color-emerald-50: #ecf8ea;
+  --color-emerald-100: #d4f0d0;
+  --color-emerald-200: #b0e3a8;
+  --color-emerald-500: #3fa84a;
+  --color-emerald-600: #2f8f3b;
+  --color-emerald-700: #247230;
+
+  /* orange accent for in-progress / kitchen states */
+  --color-orange-50: #fff4e8;
+  --color-orange-100: #ffe5cc;
+  --color-orange-200: #ffcc99;
+  --color-orange-500: #ff7a1a;
+  --color-orange-600: #ec6208;
+  --color-orange-700: #bf4a05;
+}
+
+html:has(.adm) {
+  background: var(--paper);
+  scroll-behavior: auto;
+}
+.adm {
+  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+.adm ::selection {
+  background: var(--cherry);
+  color: var(--cream);
+}
+.adm :focus-visible {
+  outline: 2px solid var(--cherry);
+  outline-offset: 2px;
+}
+/* page titles borrow the menu's serif, the way the guest side sets a heading */
+.adm-title {
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.adm-num {
+  font-family: var(--font-adm-num), var(--body), system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.adm input[type="number"]::-webkit-inner-spin-button,
+.adm input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.adm input[type="number"] {
+  -moz-appearance: textfield;
+}
+/* The red focus ring above is for buttons and links. Typing fields show focus with
+   their own neutral border instead — the ring is unlayered, so it beat Tailwind's
+   outline-none and drew a red double border round every field. */
+.adm input:focus-visible,
+.adm textarea:focus-visible,
+.adm select:focus-visible {
+  outline: none;
+}
+.adm select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23231f1c' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+/* The panel is a column the height of the screen: the mobile top bar, then the
+   page, then the footer. The page takes the slack, which keeps the footer on the
+   bottom edge of a short screen and lets it scroll away normally on a long one.
+   dvh so a phone's collapsing address bar doesn't leave a strip below it. */
+.adm-app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  /* Nothing in the panel should drive the window into horizontal scroll on a
+     phone — stray wide tables (bills, stock movements, catalog grids) stay
+     inside their own `overflow-x-auto` wrappers. */
+  overflow-x: clip;
+}
+
+/* ---------- the cocoa band, same as the one the guest menu wears on top ---------- */
+.adm-side {
+  background: linear-gradient(180deg, var(--cocoa-2), var(--cocoa));
+  box-shadow: inset -3px 0 0 var(--cherry);
+  color: var(--cream);
+}
+.adm-side__brand b {
+  color: var(--cream);
+  font-weight: 800 !important;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+.adm-side__brand small {
+  color: rgba(255, 246, 227, 0.42);
+}
+.adm-side hr {
+  border: 0;
+  border-top: 1px solid var(--line-dark);
+}
+.adm-link {
+  color: rgba(255, 246, 227, 0.72);
+  transition: background-color 0.25s, color 0.25s, transform 0.25s;
+}
+.adm-link:hover {
+  transform: translateX(2px);
+  background: rgba(255, 246, 227, 0.08);
+  color: var(--cream);
+}
+.adm-link.is-on {
+  background: linear-gradient(135deg, var(--cherry), #f05a20);
+  color: #fff;
+  box-shadow: 0 8px 16px -10px rgba(224, 58, 30, 0.9);
+}
+.adm-link.is-on:hover {
+  background: var(--cherry);
+}
+
+/* bars grow from the baseline once, then just resize */
+.adm-bar {
+  transform-origin: bottom;
+  animation: adm-grow 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 35ms);
+}
+.adm-fill {
+  transform-origin: left;
+  animation: adm-grow-x 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes adm-grow {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes adm-grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+.adm-in {
+  animation: adm-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes adm-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.adm-pulse {
+  position: relative;
+}
+.adm-pulse::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  border: 2px solid currentColor;
+  animation: adm-ping 1.6s ease-out infinite;
+}
+@keyframes adm-ping {
+  from {
+    opacity: 0.7;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+.adm-drawer {
+  animation: adm-drawer 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes adm-drawer {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+}
+.adm-scrim {
+  animation: adm-fade 0.25s both;
+}
+@keyframes adm-fade {
+  from {
+    opacity: 0;
+  }
+}
+.adm-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.adm-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-slate-200) transparent;
+}
+
+
+/* ---------- quick-bites polish: press feedback, card lift, softer corners ---------- */
+.adm button,
+.adm a[class*="rounded"] {
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s, box-shadow 0.25s, transform 0.2s var(--ease-back);
+}
+.adm button:not(:disabled):active {
+  transform: scale(0.97);
+}
+.adm .bg-white.rounded-xl,
+.adm .bg-white.rounded-2xl {
+  box-shadow: 0 1px 0 rgba(33, 28, 24, 0.04), 0 10px 24px -18px rgba(33, 28, 24, 0.35);
+}
+.adm button.bg-red-600,
+.adm a.bg-red-600 {
+  box-shadow: 0 8px 16px -10px rgba(220, 52, 20, 0.9);
+}
+.adm button.bg-red-600:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+.adm input:focus-visible,
+.adm textarea:focus-visible,
+.adm select:focus-visible {
+  box-shadow: 0 0 0 3px rgba(255, 184, 28, 0.35);
+}
+.adm-scrim {
+  backdrop-filter: blur(3px);
+}
+
+/* ---------- print ---------- */
+.adm-print {
+  display: none;
+}
+@media print {
+  @page {
+    margin: 10mm;
+  }
+  html:has(.adm),
+  .adm {
+    background: #fff !important;
+  }
+  .adm-app {
+    display: none !important;
+  }
+  .adm-print {
+    display: block;
+    color: #000;
+  }
+}
+
+/* QR cards: two per row on A4 */
+.qr-sheet {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8mm;
+}
+.qr-card {
+  break-inside: avoid;
+  display: grid;
+  justify-items: center;
+  gap: 3mm;
+  padding: 8mm 6mm;
+  border: 1.5px dashed #999;
+  border-radius: 6mm;
+  text-align: center;
+  font-family: var(--font-display), Georgia, serif;
+}
+.qr-card__brand {
+  font-style: italic;
+  font-size: 16pt;
+}
+.qr-card__lead {
+  font-size: 30pt;
+  line-height: 1;
+}
+.qr-card__lead small {
+  display: block;
+  font: 600 8pt/1.4 var(--body), sans-serif;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+.qr-card__qr {
+  width: 52mm;
+}
+.qr-card__qr svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.qr-card__cta {
+  font: 600 11pt/1.3 var(--body), sans-serif;
+}
+.qr-card__url {
+  font: 400 7pt/1.2 var(--body), sans-serif;
+  color: #555;
+  word-break: break-all;
+}
+
+/* 80mm thermal receipt */
+.rcpt {
+  width: 72mm;
+  margin: 0 auto;
+  font: 400 10pt/1.35 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: #000;
+}
+.rcpt h1 {
+  margin: 0;
+  font: 700 13pt/1.2 var(--body), sans-serif;
+  text-align: center;
+}
+.rcpt .c {
+  text-align: center;
+}
+.rcpt hr {
+  border: 0;
+  border-top: 1px dashed #000;
+  margin: 2mm 0;
+}
+.rcpt .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 3mm;
+}
+.rcpt .big {
+  font-weight: 700;
+  font-size: 12pt;
+}
+
+.rcpt--2 {
+  font-size: 8pt;
+}
+.rcpt--2 h1 {
+  font-size: 11pt;
+}
+.rcpt--2 .big {
+  font-size: 10pt;
+}
+
+/* A3 / A4 / A5 invoice — sized in em, so paper size only changes font-size */
+.inv {
+  font: 400 11pt/1.45 var(--body), "Segoe UI", Arial, sans-serif;
+  color: #000;
+}
+.inv--a5 {
+  font-size: 9pt;
+}
+.inv--a4 {
+  font-size: 11pt;
+}
+.inv--a3 {
+  font-size: 15pt;
+}
+.inv p {
+  margin: 0;
+}
+.inv__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5em;
+  padding-bottom: 0.8em;
+  border-bottom: 2px solid #000;
+}
+.inv__head h1 {
+  margin: 0;
+  font-size: 1.9em;
+  line-height: 1.1;
+}
+.inv__head p {
+  color: #444;
+}
+.inv__meta {
+  text-align: right;
+}
+.inv__meta h2 {
+  margin: 0;
+  font-size: 1.3em;
+  letter-spacing: 0.2em;
+}
+.inv__to {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5em;
+  margin: 1em 0;
+}
+.inv__to span {
+  display: block;
+  font-size: 0.75em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #666;
+}
+.inv__r {
+  text-align: right;
+}
+.inv__tbl {
+  width: 100%;
+  border-collapse: collapse;
+}
+.inv__tbl th,
+.inv__tbl td {
+  padding: 0.45em 0.5em;
+  text-align: left;
+  border-bottom: 1px solid #ccc;
+}
+.inv__tbl th {
+  font-size: 0.8em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: #f1f1f1;
+  border-bottom: 1px solid #000;
+}
+.inv__tbl .n {
+  text-align: right;
+  white-space: nowrap;
+}
+.inv__tbl tr {
+  break-inside: avoid;
+}
+.inv__sum {
+  width: 55%;
+  margin: 1em 0 0 auto;
+  break-inside: avoid;
+}
+.inv__sum div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  padding: 0.2em 0;
+}
+.inv__sum dt,
+.inv__sum dd {
+  margin: 0;
+}
+.inv__tot {
+  margin-top: 0.3em;
+  padding-top: 0.5em !important;
+  border-top: 2px solid #000;
+  font-size: 1.25em;
+  font-weight: 700;
+}
+.inv__foot {
+  margin-top: 2.5em;
+  text-align: center;
+  font-size: 0.85em;
+  color: #555;
+}

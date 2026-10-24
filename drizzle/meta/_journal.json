@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790665062817,
+      "tag": "0000_light_naoko",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790919381808,
+      "tag": "0001_stale_junta",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790931839046,
+      "tag": "0002_split_payment",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790957489904,
+      "tag": "0003_phone_tabs",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791046732438,
+      "tag": "0004_gst_invoices",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791395704293,
+      "tag": "0005_expense_categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791500000000,
+      "tag": "0006_shop_details",
+      "breakpoints": true
+    }
+  ]
+}

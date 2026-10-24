@@ -1,0 +1,299 @@
+import { bigint, boolean, index, integer, jsonb, numeric, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import type { BillSource, CouponSource, DiscountType, IngredientMoveType, IngredientUnit, OrderItem, OrderSource, OrderStatus, PayMethod, SessionStatus, StockMoveType } from "../types";
+
+/* One database table per type in lib/types.ts. Ids stay the app's own short text ids and
+   timestamps stay epoch milliseconds, so rows map 1:1 onto the shapes the UI
+   already consumes. Money is numeric(12,2), read back as a JS number. */
+
+const ms = (name: string) => bigint(name, { mode: "number" });
+const money = (name: string) => numeric(name, { precision: 12, scale: 2, mode: "number" });
+/** Ingredient quantities are measured in grams or millilitres — three decimals is enough for a pinch. */
+const amount = (name: string) => numeric(name, { precision: 14, scale: 3, mode: "number" });
+/** Per-unit cost (₹ / g or ₹ / ml) stays accurate even for cheap bulk goods. */
+const unitCost = (name: string) => numeric(name, { precision: 14, scale: 6, mode: "number" });
+
+/** Single row (id = 1). */
+export const settings = pgTable("settings", {
+  id: integer("id").primaryKey().default(1),
+  shopName: text("shop_name").notNull(),
+  publicUrl: text("public_url").notNull().default(""),
+  /** Shop details printed on receipts and invoices — editable from Settings. */
+  ownerName: text("owner_name").notNull().default("KARTHIKEYAN G"),
+  location: text("location").notNull().default("New bustand, Thanjavur"),
+  /** Postal address, one line per row. */
+  address: text("address").notNull().default("Shop no : 6\nMunicipal complex\nC block\nNew bustand\nThanjavur 613005"),
+  email: text("email").notNull().default("eightistotwo@gmail.com"),
+  /** Second branch (blank until filled in), a WhatsApp number per branch, and the other contact points. */
+  address2: text("address2").notNull().default(""),
+  whatsapp1: text("whatsapp1").notNull().default(""),
+  whatsapp2: text("whatsapp2").notNull().default(""),
+  customerCare: text("customer_care").notNull().default(""),
+  mapsUrl: text("maps_url").notNull().default(""),
+  logoUrl: text("logo_url").notNull().default(""),
+  /** Hide the "Customer tab" flow in POS Billing — the shop only takes walk-ins. */
+  walkInsOnly: boolean("walk_ins_only").notNull().default(false),
+  /** On-screen kitchen ticket queue (KOT) — when false the Kitchen page and nav hide. */
+  kotEnabled: boolean("kot_enabled").notNull().default(true),
+  /** When false the customer-facing site is menu-only: no cart, no tabs, no "send to kitchen".
+      Admin's "Open tabs" and the Billing "Customer tab" mode also hide. */
+  orderingEnabled: boolean("ordering_enabled").notNull().default(true),
+});
+
+/** Single row (id = 1): the change counter the admin panel polls, and the order-number sequence. */
+export const meta = pgTable("meta", {
+  id: integer("id").primaryKey().default(1),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  orderSeq: integer("order_seq").notNull().default(0),
+});
+
+export const products = pgTable("products", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  price: money("price").notNull(),
+  stock: integer("stock"),
+  lowAt: integer("low_at").notNull().default(4),
+  description: text("description").notNull().default(""),
+  image: text("image").notNull().default(""),
+  eggless: boolean("eggless").notNull().default(false),
+  tags: jsonb("tags").$type<string[]>().notNull().default([]),
+  active: boolean("active").notNull().default(true),
+  createdAt: ms("created_at").notNull(),
+  updatedAt: ms("updated_at").notNull(),
+});
+
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    status: text("status").$type<SessionStatus>().notNull(),
+    openedAt: ms("opened_at").notNull(),
+    closedAt: ms("closed_at"),
+    customerName: text("customer_name").notNull().default(""),
+    /** 10-digit mobile: the key a tab is found by */
+    customerPhone: text("customer_phone").notNull(),
+    billRequestedAt: ms("bill_requested_at"),
+    billId: text("bill_id"),
+    /** coupon the guest applied from their phone; validated again when the bill is made */
+    couponCode: text("coupon_code"),
+  },
+  (t) => [
+    // a phone number can never have two open tabs
+    uniqueIndex("sessions_one_open_per_phone").on(t.customerPhone).where(sql`${t.status} = 'open'`),
+    index("sessions_phone_idx").on(t.customerPhone),
+  ],
+);
+
+export const orders = pgTable(
+  "orders",
+  {
+    id: text("id").primaryKey(),
+    no: integer("no").notNull(),
+    sessionId: text("session_id").notNull(),
+    items: jsonb("items").$type<OrderItem[]>().notNull(),
+    note: text("note").notNull().default(""),
+    customerName: text("customer_name").notNull().default(""),
+    customerPhone: text("customer_phone").notNull().default(""),
+    status: text("status").$type<OrderStatus>().notNull(),
+    source: text("source").$type<OrderSource>().notNull(),
+    subtotal: money("subtotal").notNull(),
+    createdAt: ms("created_at").notNull(),
+    updatedAt: ms("updated_at").notNull(),
+  },
+  (t) => [index("orders_session_idx").on(t.sessionId), index("orders_created_idx").on(t.createdAt)],
+);
+
+export const bills = pgTable(
+  "bills",
+  {
+    id: text("id").primaryKey(),
+    invoiceNo: text("invoice_no").notNull(),
+    source: text("source").$type<BillSource>().notNull(),
+    sessionId: text("session_id"),
+    customerName: text("customer_name").notNull().default(""),
+    customerPhone: text("customer_phone").notNull().default(""),
+    items: jsonb("items").$type<OrderItem[]>().notNull(),
+    itemCount: integer("item_count").notNull(),
+    subtotal: money("subtotal").notNull(),
+    couponCode: text("coupon_code"),
+    couponPercent: money("coupon_percent").notNull().default(0),
+    couponDiscount: money("coupon_discount").notNull().default(0),
+    couponSource: text("coupon_source").$type<CouponSource>(),
+    manualType: text("manual_type").$type<DiscountType>().notNull(),
+    manualValue: money("manual_value").notNull().default(0),
+    manualDiscount: money("manual_discount").notNull().default(0),
+    discount: money("discount").notNull().default(0),
+    extra: money("extra").notNull().default(0),
+    isGst: boolean("is_gst").notNull().default(false),
+    gstPercent: money("gst_percent").notNull().default(0),
+    taxableAmount: money("taxable_amount").notNull().default(0),
+    gstAmount: money("gst_amount").notNull().default(0),
+    total: money("total").notNull(),
+    payment: text("payment").$type<PayMethod>().notNull(),
+    cashAmount: money("cash_amount").notNull().default(0),
+    upiAmount: money("upi_amount").notNull().default(0),
+    cardAmount: money("card_amount").notNull().default(0),
+    received: money("received").notNull(),
+    change: money("change").notNull().default(0),
+    status: text("status").$type<"completed" | "void">().notNull(),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("bills_invoice_uq").on(t.invoiceNo), index("bills_created_idx").on(t.createdAt)],
+);
+
+export const coupons = pgTable(
+  "coupons",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    percent: money("percent").notNull(),
+    minOrder: money("min_order").notNull().default(0),
+    expiresAt: text("expires_at"),
+    limit: integer("usage_limit"),
+    used: integer("used").notNull().default(0),
+    active: boolean("active").notNull().default(true),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("coupons_code_uq").on(t.code)],
+);
+
+export const staffUsers = pgTable(
+  "staff_users",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    mobile: text("mobile").notNull(),
+    email: text("email").notNull().default(""),
+    passwordHash: text("password_hash").notNull(),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("staff_mobile_uq").on(t.mobile)],
+);
+
+/** Failed admin sign-ins per client, so the lockout holds across serverless instances. */
+export const loginAttempts = pgTable("login_attempts", {
+  key: text("key").primaryKey(),
+  fails: integer("fails").notNull().default(0),
+  lockedUntil: ms("locked_until").notNull().default(0),
+});
+
+export const expenses = pgTable(
+  "expenses",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    category: text("category").notNull(),
+    amount: money("amount").notNull(),
+    paymentMode: text("payment_mode").notNull().default("cash"),
+    notes: text("notes").notNull().default(""),
+    /** YYYY-MM-DD, shop-local */
+    expenseDate: text("expense_date").notNull(),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [index("expenses_date_idx").on(t.expenseDate)],
+);
+
+/** The shop's own list of expense categories. Expenses keep the category as plain text,
+    so renaming here renames them there too. */
+export const expenseCategories = pgTable(
+  "expense_categories",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("expense_categories_name_uq").on(sql`lower(${t.name})`)],
+);
+
+/* ---------------- Raw-ingredient inventory ----------------
+   The shop buys sugar, milk, flour by the gram or millilitre. Each ingredient
+   keeps a running stock and a weighted-average per-unit cost (so adding a new
+   batch of sugar at a different price updates the cost per gram smoothly).
+   Every movement — purchase, batch use, waste or adjustment — is journalled
+   so the ledger below can filter, sum and export to Excel. */
+export const ingredients = pgTable(
+  "ingredients",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    unit: text("unit").$type<IngredientUnit>().notNull(),
+    stock: amount("stock").notNull().default(0),
+    costPerUnit: unitCost("cost_per_unit").notNull().default(0),
+    lowAt: amount("low_at").notNull().default(0),
+    active: boolean("active").notNull().default(true),
+    createdAt: ms("created_at").notNull(),
+    updatedAt: ms("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("ingredients_name_uq").on(sql`lower(${t.name})`)],
+);
+
+/** A reusable list of ingredients for a product — "Chocolate cake" with its sugar,
+    milk and flour amounts — so logging a repeat batch is a one-click fill of the
+    batch form, not a retype. The items array keeps the ingredient id, qty and an
+    optional per-line note; qty is in each ingredient's own unit. */
+export const recipes = pgTable(
+  "recipes",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    note: text("note").notNull().default(""),
+    items: jsonb("items").$type<{ ingredientId: string; qty: number; note: string }[]>().notNull().default([]),
+    createdAt: ms("created_at").notNull(),
+    updatedAt: ms("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("recipes_name_uq").on(sql`lower(${t.name})`)],
+);
+
+/** One production run — "Chocolate cake × 2" — groups the uses that fed it. */
+export const batches = pgTable(
+  "batches",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    note: text("note").notNull().default(""),
+    totalCost: money("total_cost").notNull().default(0),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [index("batches_created_idx").on(t.createdAt)],
+);
+
+/** Every change to an ingredient's stock, newest last — a purchase adds, a
+    batch use or waste removes. `cost` is the ₹ value of this line (positive). */
+export const ingredientMoves = pgTable(
+  "ingredient_moves",
+  {
+    id: text("id").primaryKey(),
+    ingredientId: text("ingredient_id").notNull(),
+    ingredientName: text("ingredient_name").notNull(),
+    unit: text("unit").$type<IngredientUnit>().notNull(),
+    /** signed: + into stock, − out of it */
+    qty: amount("qty").notNull(),
+    type: text("type").$type<IngredientMoveType>().notNull(),
+    cost: money("cost").notNull().default(0),
+    balanceAfter: amount("balance_after").notNull(),
+    batchId: text("batch_id"),
+    note: text("note").notNull().default(""),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [index("ingredient_moves_created_idx").on(t.createdAt), index("ingredient_moves_ing_idx").on(t.ingredientId), index("ingredient_moves_batch_idx").on(t.batchId)],
+);
+
+/** Every change to a product's tracked stock, newest last. */
+export const stockMovements = pgTable(
+  "stock_movements",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id").notNull(),
+    productName: text("product_name").notNull(),
+    type: text("type").$type<StockMoveType>().notNull(),
+    /** signed: + into stock, − out of it */
+    qty: integer("qty").notNull(),
+    balanceAfter: integer("balance_after").notNull(),
+    note: text("note").notNull().default(""),
+    /** what caused it: an order id, bill id or invoice number */
+    ref: text("ref").notNull().default(""),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [index("stock_moves_created_idx").on(t.createdAt), index("stock_moves_product_idx").on(t.productId)],
+);
