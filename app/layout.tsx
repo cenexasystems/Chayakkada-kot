@@ -22,6 +22,8 @@ export const metadata: Metadata = {
   title: "8:2's chayakkada | Thanjavur",
   description: "Order from your phone at 8:2's chayakkada — browse the menu, add to your tab and pay at the counter.",
   robots: { index: false, follow: false },
+  // the shop logo from Settings (see app/shop-logo/route.ts)
+  icons: { icon: "/shop-logo", apple: "/shop-logo" },
 };
 
 export const viewport: Viewport = {

@@ -173,6 +173,11 @@ export function shopName(): Promise<string> {
   return shopNameOf(db);
 }
 
+/** The logo from Settings: a data URL, an http(s) link, or "" for none. */
+export async function shopLogo(): Promise<string> {
+  return (await first(db.select({ l: settings.logoUrl }).from(settings).where(eq(settings.id, 1))))?.l ?? "";
+}
+
 /** Validates the lines, takes stock, opens a tab if needed and files the order.
     A guest names their mobile; staff may instead name an open tab by its id. */
 async function addOrder(tx: Tx, a: Args, opts: { fromCustomer: boolean }): Promise<Order> {
