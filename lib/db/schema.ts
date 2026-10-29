@@ -153,6 +153,12 @@ export const coupons = pgTable(
     limit: integer("usage_limit"),
     used: integer("used").notNull().default(0),
     active: boolean("active").notNull().default(true),
+    /** when on, only the phones in `phones` can use it */
+    restricted: boolean("restricted").notNull().default(false),
+    /** 10-digit mobiles the coupon has been sent to */
+    phones: jsonb("phones").$type<string[]>().notNull().default([]),
+    /** how many times it has been sent */
+    sent: integer("sent").notNull().default(0),
     createdAt: ms("created_at").notNull(),
   },
   (t) => [uniqueIndex("coupons_code_uq").on(t.code)],

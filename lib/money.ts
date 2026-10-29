@@ -18,8 +18,17 @@ export function shopToday(now = Date.now()) {
 
 export type CouponCheck = { ok: true } | { ok: false; reason: string };
 
-export function checkCoupon(c: Coupon, subtotal: number, now = Date.now()): CouponCheck {
+/** Last 10 digits of a mobile, for comparing against the phones a coupon was sent to. */
+export const last10 = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "").slice(-10);
+
+/** `phone` is the customer's mobile; a coupon locked to the phones it was sent to needs it. */
+export function checkCoupon(c: Coupon, subtotal: number, phone?: string | null, now = Date.now()): CouponCheck {
   if (!c.active) return { ok: false, reason: "Paused" };
+  if (c.restricted) {
+    const p = last10(phone);
+    if (!p) return { ok: false, reason: "Only for the customer it was sent to — enter their mobile" };
+    if (!(c.phones ?? []).includes(p)) return { ok: false, reason: "Not valid for this mobile number" };
+  }
   if (c.expiresAt && c.expiresAt < shopToday(now)) return { ok: false, reason: "Expired" };
   if (c.limit !== null && c.used >= c.limit) return { ok: false, reason: "Usage limit reached" };
   if (subtotal < c.minOrder) return { ok: false, reason: `Needs ${rupee(c.minOrder)} subtotal` };
@@ -42,12 +51,14 @@ export type BillInput = {
   /** GST bill: tax is added on top of the prices (exclusive). A non-GST bill carries none. */
   gst?: boolean;
   gstPercent?: number;
+  /** customer's mobile — checked against coupons locked to certain phones */
+  phone?: string | null;
 };
 
-export function computeBill({ items, coupon, manualType, manualValue, extra, gst = false, gstPercent = 0 }: BillInput) {
+export function computeBill({ items, coupon, manualType, manualValue, extra, gst = false, gstPercent = 0, phone }: BillInput) {
   const subtotal = round2(items.reduce((s, i) => s + i.price * i.qty, 0));
   const itemCount = items.reduce((s, i) => s + i.qty, 0);
-  const couponOk = coupon ? checkCoupon(coupon, subtotal) : null;
+  const couponOk = coupon ? checkCoupon(coupon, subtotal, phone) : null;
   const couponDiscount = coupon && couponOk?.ok ? Math.round((subtotal * coupon.percent) / 100) : 0;
   const afterCoupon = Math.max(0, subtotal - couponDiscount);
   const mv = Math.max(0, Number(manualValue) || 0);

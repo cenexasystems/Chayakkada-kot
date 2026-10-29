@@ -121,8 +121,8 @@ async function view(q: Q, phone: string): Promise<TabView> {
   const live = list.filter((o) => o.status !== "cancelled");
   const total = round2(live.reduce((a, o) => a + o.subtotal, 0));
   const cp = s?.couponCode ? cps.find((c) => c.code === s.couponCode) ?? null : null;
-  const check = cp ? checkCoupon(cp, total) : null;
-  const discount = cp && check?.ok ? computeBill({ items: live.flatMap((o) => o.items), coupon: cp, manualType: "amount", manualValue: 0, extra: 0 }).couponDiscount : 0;
+  const check = cp ? checkCoupon(cp, total, s?.customerPhone) : null;
+  const discount = cp && check?.ok ? computeBill({ items: live.flatMap((o) => o.items), coupon: cp, manualType: "amount", manualValue: 0, extra: 0, phone: s?.customerPhone }).couponDiscount : 0;
   return {
     shopName: name,
     details: {
@@ -266,7 +266,7 @@ export function applyCoupon(raw: unknown, couponRaw: unknown) {
     if (!cp) throw new ApiError(`Coupon ${cc} doesn't exist.`);
     const live = (await tx.select().from(orders).where(eq(orders.sessionId, s.id))).filter((o) => o.status !== "cancelled");
     const sub = round2(live.reduce((a, o) => a + o.subtotal, 0));
-    const ok = checkCoupon(cp, sub);
+    const ok = checkCoupon(cp, sub, phone);
     if (!ok.ok) throw new ApiError(`Coupon ${cp.code}: ${ok.reason}.`);
     await tx.update(sessions).set({ couponCode: cp.code }).where(eq(sessions.id, s.id));
     return phone;
@@ -586,7 +586,7 @@ async function saveCoupon(tx: Tx, a: Args) {
   const id = str(a.id, 40);
   const clash = await first(tx.select().from(coupons).where(eq(coupons.code, c)));
   if (clash && clash.id !== id) throw new ApiError(`${c} already exists.`);
-  const fields = { code: c, percent, minOrder: round2(minOrder), expiresAt: exp || null, limit: limit === null ? null : Math.floor(limit), active: a.active !== false };
+  const fields = { code: c, percent, minOrder: round2(minOrder), expiresAt: exp || null, limit: limit === null ? null : Math.floor(limit), active: a.active !== false, ...(typeof a.restricted === "boolean" ? { restricted: a.restricted } : {}) };
   if (id) {
     await must(tx.select().from(coupons).where(eq(coupons.id, id)), "Coupon");
     const [x] = await tx.update(coupons).set(fields).where(eq(coupons.id, id)).returning();
@@ -594,6 +594,33 @@ async function saveCoupon(tx: Tx, a: Args) {
   }
   const [x] = await tx.insert(coupons).values({ id: uid(), ...fields, used: 0, createdAt: Date.now() }).returning();
   return x;
+}
+
+/** Records that a coupon went to a customer (WhatsApp link or PDF), and whether it is
+    locked to the phones it was sent to. */
+async function sendCoupon(tx: Tx, a: Args) {
+  const cp = await must(tx.select().from(coupons).where(eq(coupons.id, str(a.id, 40))), "Coupon");
+  const phone = mobile(a.phone);
+  if (!phone) throw new ApiError("Enter the customer's 10-digit WhatsApp number.");
+  const phones = cp.phones.includes(phone) ? cp.phones : [...cp.phones, phone];
+  const [x] = await tx
+    .update(coupons)
+    .set({ phones, sent: sql`${coupons.sent} + 1`, ...(typeof a.restricted === "boolean" ? { restricted: a.restricted } : {}) })
+    .where(eq(coupons.id, cp.id))
+    .returning();
+  return x;
+}
+
+/** What the public coupon page shows. Paused, expired or used-up coupons still show, marked as such. */
+export function couponForPage(raw: unknown) {
+  return read(async (q) => {
+    const cc = str(raw, 24).toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!cc) return null;
+    const cp = await first(q.select().from(coupons).where(eq(coupons.code, cc)));
+    if (!cp) return null;
+    const shop = await first(q.select({ n: settings.shopName, logoUrl: settings.logoUrl }).from(settings).where(eq(settings.id, 1)));
+    return { coupon: { code: cp.code, percent: cp.percent, minOrder: cp.minOrder, expiresAt: cp.expiresAt, restricted: cp.restricted, active: cp.active, limit: cp.limit, used: cp.used }, shopName: shop?.n ?? "Cafe", logoUrl: shop?.logoUrl ?? "" };
+  });
 }
 
 async function createBill(tx: Tx, a: Args): Promise<Bill> {
@@ -631,7 +658,9 @@ async function createBill(tx: Tx, a: Args): Promise<Bill> {
   const isGst = a.isGst === true;
   const gstRaw = num(a.gstPercent);
   if (isGst && !(gstRaw >= 0 && gstRaw <= 100)) throw new ApiError("GST should be between 0 and 100%.");
-  const calc = computeBill({ items, coupon, manualType, manualValue, extra: num(a.extra) || 0, gst: isGst, gstPercent: isGst ? gstRaw : 0 });
+  const phone = mobile(a.customerPhone);
+  if (phone === null) throw new ApiError("Customer mobile should be a 10-digit number.");
+  const calc = computeBill({ items, coupon, manualType, manualValue, extra: num(a.extra) || 0, gst: isGst, gstPercent: isGst ? gstRaw : 0, phone: phone || s?.customerPhone });
   if (coupon && calc.couponOk && !calc.couponOk.ok) throw new ApiError(`Coupon ${coupon.code}: ${calc.couponOk.reason}.`);
 
   const payment: PayMethod = a.payment === "upi" || a.payment === "card" || a.payment === "split" ? a.payment : "cash";
@@ -649,9 +678,6 @@ async function createBill(tx: Tx, a: Args): Promise<Bill> {
     if (!(cashAmount > 0) || !(cardAmount > 0)) throw new ApiError("Split payment needs both a cash and a card amount.");
     if (round2(cashAmount + cardAmount) !== calc.total) throw new ApiError("Cash and card must add up to the grand total.");
   }
-
-  const phone = mobile(a.customerPhone);
-  if (phone === null) throw new ApiError("Customer mobile should be a 10-digit number.");
 
   // Stock: tab orders already took stock when they were placed, so only the
   // difference between what's billed and what was ordered moves stock now.
@@ -1098,6 +1124,8 @@ export function adminOp(op: string, a: Args) {
       /* ---------- coupons ---------- */
       case "coupon.save":
         return saveCoupon(tx, a);
+      case "coupon.send":
+        return sendCoupon(tx, a);
       case "coupon.delete": {
         await must(tx.select().from(coupons).where(eq(coupons.id, id)), "Coupon");
         await tx.delete(coupons).where(eq(coupons.id, id));

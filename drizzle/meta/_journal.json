@@ -64,6 +64,13 @@
       "when": 1791500200000,
       "tag": "0008_ingredients_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791500300000,
+      "tag": "0009_coupon_sends",
+      "breakpoints": true
     }
   ]
 }

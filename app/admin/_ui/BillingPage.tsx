@@ -122,7 +122,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     .filter((l) => l.name.trim() || Number(l.price) > 0)
     .map((l) => ({ productId: l.productId, name: l.name.trim(), price: Math.max(0, Number(l.price) || 0), qty: l.qty }));
   const cp = s.coupons.find((c) => c.code === coupon) ?? null;
-  const calc = computeBill({ items, coupon: cp, manualType: mType, manualValue: Number(mVal) || 0, extra: Number(extra) || 0, gst: isGst, gstPercent: Number(gstPct) || 0 });
+  const calc = computeBill({ items, coupon: cp, manualType: mType, manualValue: Number(mVal) || 0, extra: Number(extra) || 0, gst: isGst, gstPercent: Number(gstPct) || 0, phone });
   const recv = Number(received) || 0;
   const change = pay === "cash" && recv > 0 ? recv - calc.total : 0;
 
@@ -419,7 +419,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               <select className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-[14px] font-semibold text-slate-800 outline-none focus:border-slate-400" value={coupon} onChange={(e) => setCoupon(e.target.value)}>
                 <option value="">No Coupon</option>
                 {couponOptions.map((c) => {
-                  const ok = checkCoupon(c, calc.subtotal);
+                  const ok = checkCoupon(c, calc.subtotal, phone);
                   return (
                     <option key={c.id} value={c.code} disabled={!ok.ok && c.code !== coupon}>
                       {c.code} — {c.percent}% off{c.minOrder ? ` (min ${rupee(c.minOrder)})` : ""}

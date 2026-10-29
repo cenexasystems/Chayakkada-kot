@@ -11,6 +11,7 @@ const ADMIN_ONLY_OPS = new Set([
   "user.promote",
   "user.demote",
   "coupon.save",
+  "coupon.send",
   "coupon.delete",
   "expense.save",
   "expense.delete",

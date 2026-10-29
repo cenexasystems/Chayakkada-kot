@@ -116,6 +116,12 @@ export type Coupon = {
   limit: number | null;
   used: number;
   active: boolean;
+  /** only the phones it was sent to can use it */
+  restricted: boolean;
+  /** 10-digit mobiles it was sent to */
+  phones: string[];
+  /** times sent on WhatsApp / as a PDF */
+  sent: number;
   createdAt: number;
 };
 
