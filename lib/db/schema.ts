@@ -1,5 +1,7 @@
 import { bigint, boolean, index, integer, jsonb, numeric, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { Audit, CampaignType, LedgerType, LoyaltyStatus, Segment, VoucherSource, VoucherStatus } from "../loyalty/types";
+import type { LoyaltyConfig, RewardKind, TierKey } from "../loyalty/config";
 import type { BillSource, CouponSource, DiscountType, IngredientMoveType, IngredientUnit, OrderItem, OrderSource, OrderStatus, PayMethod, SessionStatus, StockMoveType } from "../types";
 
 /* One database table per type in lib/types.ts. Ids stay the app's own short text ids and
@@ -137,6 +139,14 @@ export const bills = pgTable(
     received: money("received").notNull(),
     change: money("change").notNull().default(0),
     status: text("status").$type<"completed" | "void">().notNull(),
+    /* loyalty (all zero / null on bills without a member) */
+    loyaltyCustomerId: text("loyalty_customer_id"),
+    pointsRedeemed: integer("points_redeemed").notNull().default(0),
+    pointsDiscount: money("points_discount").notNull().default(0),
+    rewardRef: text("reward_ref"),
+    rewardName: text("reward_name"),
+    rewardDiscount: money("reward_discount").notNull().default(0),
+    pointsEarned: integer("points_earned").notNull().default(0),
     createdAt: ms("created_at").notNull(),
   },
   (t) => [uniqueIndex("bills_invoice_uq").on(t.invoiceNo), index("bills_created_idx").on(t.createdAt)],
@@ -302,4 +312,213 @@ export const stockMovements = pgTable(
     createdAt: ms("created_at").notNull(),
   },
   (t) => [index("stock_moves_created_idx").on(t.createdAt), index("stock_moves_product_idx").on(t.productId)],
+);
+
+/* ============================== loyalty ============================== */
+
+/** Single row (id = 1): the whole programme's settings as one JSON document. */
+export const loyaltySettings = pgTable("loyalty_settings", {
+  id: integer("id").primaryKey().default(1),
+  config: jsonb("config").$type<LoyaltyConfig>().notNull(),
+  updatedAt: ms("updated_at").notNull(),
+});
+
+/** A loyalty member, keyed by the same 10-digit mobile bills and tabs use. Balances are
+    a cache of the ledger, always written in the same transaction as the ledger row. */
+export const loyaltyCustomers = pgTable(
+  "loyalty_customers",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    phone: text("phone").notNull(),
+    name: text("name").notNull().default(""),
+    email: text("email").notNull().default(""),
+    birthday: text("birthday").notNull().default(""),
+    anniversary: text("anniversary").notNull().default(""),
+    status: text("status").$type<LoyaltyStatus>().notNull().default("active"),
+    consent: boolean("consent").notNull().default(true),
+    referralCode: text("referral_code").notNull(),
+    referredBy: text("referred_by"),
+    walletToken: text("wallet_token").notNull(),
+    tier: text("tier").$type<TierKey>().notNull().default("bronze"),
+    tierSince: ms("tier_since").notNull(),
+    available: integer("available").notNull().default(0),
+    lifetime: integer("lifetime").notNull().default(0),
+    redeemed: integer("redeemed").notNull().default(0),
+    expired: integer("expired").notNull().default(0),
+    debt: integer("debt").notNull().default(0),
+    stamps: integer("stamps").notNull().default(0),
+    note: text("note").notNull().default(""),
+    createdAt: ms("created_at").notNull(),
+    updatedAt: ms("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("loyalty_customers_phone_uq").on(t.phone),
+    uniqueIndex("loyalty_customers_code_uq").on(t.code),
+    uniqueIndex("loyalty_customers_ref_uq").on(t.referralCode),
+    uniqueIndex("loyalty_customers_wallet_uq").on(t.walletToken),
+  ],
+);
+
+/** Every points movement, never edited or deleted. `key` makes credits idempotent. */
+export const loyaltyLedger = pgTable(
+  "loyalty_ledger",
+  {
+    id: text("id").primaryKey(),
+    customerId: text("customer_id").notNull().references(() => loyaltyCustomers.id),
+    type: text("type").$type<LedgerType>().notNull(),
+    points: integer("points").notNull(),
+    balanceBefore: integer("balance_before").notNull(),
+    balanceAfter: integer("balance_after").notNull(),
+    billId: text("bill_id"),
+    invoiceNo: text("invoice_no"),
+    ref: text("ref").notNull().default(""),
+    key: text("key"),
+    description: text("description").notNull().default(""),
+    expiresAt: ms("expires_at"),
+    actor: text("actor").notNull().default("system"),
+    reversalOf: text("reversal_of"),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("loyalty_ledger_key_uq").on(t.key),
+    index("loyalty_ledger_customer_idx").on(t.customerId, t.createdAt),
+    index("loyalty_ledger_created_idx").on(t.createdAt),
+    index("loyalty_ledger_bill_idx").on(t.billId),
+  ],
+);
+
+/** What is left of each credit, so the oldest points are spent (and expire) first. */
+export const loyaltyLots = pgTable(
+  "loyalty_lots",
+  {
+    id: text("id").primaryKey(),
+    customerId: text("customer_id").notNull().references(() => loyaltyCustomers.id),
+    ledgerId: text("ledger_id").notNull().references(() => loyaltyLedger.id),
+    points: integer("points").notNull(),
+    remaining: integer("remaining").notNull(),
+    earnedAt: ms("earned_at").notNull(),
+    expiresAt: ms("expires_at"),
+  },
+  (t) => [index("loyalty_lots_customer_idx").on(t.customerId)],
+);
+
+export const loyaltyRewards = pgTable("loyalty_rewards", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  imageUrl: text("image_url").notNull().default(""),
+  category: text("category").notNull().default(""),
+  kind: text("kind").$type<RewardKind>().notNull(),
+  value: money("value").notNull().default(0),
+  productId: text("product_id"),
+  pointsCost: integer("points_cost").notNull().default(0),
+  tiers: jsonb("tiers").$type<TierKey[]>().notNull().default([]),
+  startsOn: text("starts_on"),
+  endsOn: text("ends_on"),
+  active: boolean("active").notNull().default(true),
+  maxRedemptions: integer("max_redemptions"),
+  perCustomerLimit: integer("per_customer_limit"),
+  terms: text("terms").notNull().default(""),
+  redeemed: integer("redeemed").notNull().default(0),
+  createdAt: ms("created_at").notNull(),
+  updatedAt: ms("updated_at").notNull(),
+});
+
+/** Reward redemptions and free rewards handed out, each with a unique reference. */
+export const loyaltyVouchers = pgTable(
+  "loyalty_vouchers",
+  {
+    id: text("id").primaryKey(),
+    ref: text("ref").notNull(),
+    customerId: text("customer_id").notNull().references(() => loyaltyCustomers.id),
+    rewardId: text("reward_id"),
+    name: text("name").notNull(),
+    kind: text("kind").$type<RewardKind>().notNull(),
+    value: money("value").notNull().default(0),
+    productId: text("product_id"),
+    source: text("source").$type<VoucherSource>().notNull(),
+    pointsCost: integer("points_cost").notNull().default(0),
+    status: text("status").$type<VoucherStatus>().notNull(),
+    billId: text("bill_id"),
+    invoiceNo: text("invoice_no"),
+    key: text("key"),
+    issuedAt: ms("issued_at").notNull(),
+    usedAt: ms("used_at"),
+    expiresAt: ms("expires_at"),
+    note: text("note").notNull().default(""),
+  },
+  (t) => [uniqueIndex("loyalty_vouchers_ref_uq").on(t.ref), uniqueIndex("loyalty_vouchers_key_uq").on(t.key), index("loyalty_vouchers_customer_idx").on(t.customerId)],
+);
+
+/** One digital stamp per qualifying visit; `visitKey` stops a visit counting twice. */
+export const loyaltyStamps = pgTable(
+  "loyalty_stamps",
+  {
+    id: text("id").primaryKey(),
+    customerId: text("customer_id").notNull().references(() => loyaltyCustomers.id),
+    billId: text("bill_id").notNull(),
+    visitKey: text("visit_key").notNull(),
+    status: text("status").$type<"active" | "reversed">().notNull(),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("loyalty_stamps_visit_uq").on(t.visitKey), index("loyalty_stamps_customer_idx").on(t.customerId)],
+);
+
+export const loyaltyReferrals = pgTable(
+  "loyalty_referrals",
+  {
+    id: text("id").primaryKey(),
+    referrerId: text("referrer_id").notNull().references(() => loyaltyCustomers.id),
+    refereeId: text("referee_id").notNull().references(() => loyaltyCustomers.id),
+    status: text("status").$type<"pending" | "rewarded" | "reversed" | "rejected">().notNull(),
+    billId: text("bill_id"),
+    referrerPoints: integer("referrer_points").notNull().default(0),
+    refereePoints: integer("referee_points").notNull().default(0),
+    createdAt: ms("created_at").notNull(),
+    rewardedAt: ms("rewarded_at"),
+  },
+  (t) => [uniqueIndex("loyalty_referrals_referee_uq").on(t.refereeId), index("loyalty_referrals_referrer_idx").on(t.referrerId)],
+);
+
+export const loyaltyCampaigns = pgTable("loyalty_campaigns", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  type: text("type").$type<CampaignType>().notNull(),
+  value: money("value").notNull().default(0),
+  startsOn: text("starts_on").notNull().default(""),
+  endsOn: text("ends_on").notNull().default(""),
+  startTime: text("start_time").notNull().default(""),
+  endTime: text("end_time").notNull().default(""),
+  days: jsonb("days").$type<number[]>().notNull().default([]),
+  minPurchase: money("min_purchase").notNull().default(0),
+  tiers: jsonb("tiers").$type<TierKey[]>().notNull().default([]),
+  segments: jsonb("segments").$type<Segment[]>().notNull().default([]),
+  categories: jsonb("categories").$type<string[]>().notNull().default([]),
+  productIds: jsonb("product_ids").$type<string[]>().notNull().default([]),
+  usageLimit: integer("usage_limit"),
+  perCustomerLimit: integer("per_customer_limit"),
+  active: boolean("active").notNull().default(true),
+  used: integer("used").notNull().default(0),
+  pointsGiven: integer("points_given").notNull().default(0),
+  createdAt: ms("created_at").notNull(),
+  updatedAt: ms("updated_at").notNull(),
+});
+
+/** Sensitive loyalty actions: settings changes, manual adjustments, reversals, status changes. */
+export const loyaltyAudit = pgTable(
+  "loyalty_audit",
+  {
+    id: text("id").primaryKey(),
+    actor: text("actor").notNull(),
+    action: text("action").notNull(),
+    customerId: text("customer_id"),
+    ref: text("ref").notNull().default(""),
+    before: jsonb("before").$type<Audit["before"]>(),
+    after: jsonb("after").$type<Audit["after"]>(),
+    reason: text("reason").notNull().default(""),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [index("loyalty_audit_created_idx").on(t.createdAt), index("loyalty_audit_customer_idx").on(t.customerId)],
 );

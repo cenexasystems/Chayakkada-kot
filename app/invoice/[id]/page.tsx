@@ -214,6 +214,18 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                 <span className="font-mono text-zinc-900">− ₹{inr(b.manualDiscount)}</span>
               </div>
             )}
+            {b.rewardDiscount > 0 && (
+              <div className="flex justify-between text-zinc-600">
+                <span>Reward {b.rewardName}</span>
+                <span className="font-mono text-zinc-900">− ₹{inr(b.rewardDiscount)}</span>
+              </div>
+            )}
+            {b.pointsDiscount > 0 && (
+              <div className="flex justify-between text-zinc-600">
+                <span>Loyalty points ({b.pointsRedeemed} pts)</span>
+                <span className="font-mono text-zinc-900">− ₹{inr(b.pointsDiscount)}</span>
+              </div>
+            )}
             {b.extra > 0 && (
               <div className="flex justify-between border-t border-dashed border-zinc-200 pt-1 text-zinc-600">
                 <span>Extra charges</span>

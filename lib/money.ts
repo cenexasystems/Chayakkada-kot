@@ -53,9 +53,13 @@ export type BillInput = {
   gstPercent?: number;
   /** customer's mobile — checked against coupons locked to certain phones */
   phone?: string | null;
+  /** loyalty: a reward's value and the rupee value of redeemed points, both worked out
+      (and checked) by lib/loyalty — they come off after the coupon and manual discount */
+  rewardDiscount?: number;
+  pointsDiscount?: number;
 };
 
-export function computeBill({ items, coupon, manualType, manualValue, extra, gst = false, gstPercent = 0, phone }: BillInput) {
+export function computeBill({ items, coupon, manualType, manualValue, extra, gst = false, gstPercent = 0, phone, rewardDiscount = 0, pointsDiscount = 0 }: BillInput) {
   const subtotal = round2(items.reduce((s, i) => s + i.price * i.qty, 0));
   const itemCount = items.reduce((s, i) => s + i.qty, 0);
   const couponOk = coupon ? checkCoupon(coupon, subtotal, phone) : null;
@@ -63,7 +67,10 @@ export function computeBill({ items, coupon, manualType, manualValue, extra, gst
   const afterCoupon = Math.max(0, subtotal - couponDiscount);
   const mv = Math.max(0, Number(manualValue) || 0);
   const manualDiscount = Math.min(afterCoupon, manualType === "percent" ? Math.round((afterCoupon * Math.min(100, mv)) / 100) : round2(mv));
-  const discount = round2(couponDiscount + manualDiscount);
+  const afterManual = Math.max(0, afterCoupon - manualDiscount);
+  const rewardOff = Math.min(afterManual, Math.max(0, round2(Number(rewardDiscount) || 0)));
+  const pointsOff = Math.min(Math.max(0, afterManual - rewardOff), Math.max(0, round2(Number(pointsDiscount) || 0)));
+  const discount = round2(couponDiscount + manualDiscount + rewardOff + pointsOff);
   const ex = Math.max(0, round2(Number(extra) || 0));
   /* GST is charged on what the customer is actually billed for — items after
      discounts, plus any extra charge — and sits on top of it. */
@@ -71,7 +78,7 @@ export function computeBill({ items, coupon, manualType, manualValue, extra, gst
   const rate = gst ? Math.min(100, Math.max(0, round2(Number(gstPercent) || 0))) : 0;
   const gstAmount = round2((taxable * rate) / 100);
   const total = round2(taxable + gstAmount);
-  return { subtotal, itemCount, couponDiscount, couponOk, manualDiscount, discount, extra: ex, taxable, gstPercent: rate, gstAmount, total };
+  return { subtotal, itemCount, couponDiscount, couponOk, manualDiscount, rewardDiscount: rewardOff, pointsDiscount: pointsOff, discount, extra: ex, taxable, gstPercent: rate, gstAmount, total };
 }
 
 /** Collapse repeated products/lines into one line each. */

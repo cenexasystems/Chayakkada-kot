@@ -21,6 +21,7 @@ const NAV: Nav[] = [
   { href: "/admin/inventory/movements", label: "Stock movement", icon: "list", roles: ["admin"] },
   { href: "/admin/expenses", label: "Expenses", icon: "bag", roles: ["admin"] },
   { href: "/admin/coupons", label: "Coupons", icon: "coupon", roles: ["admin"] },
+  { href: "/admin/loyalty", label: "Loyalty", icon: "star", roles: ["admin", "staff"] },
 ];
 
 const Cherry = ({ logo }: { logo?: string }) =>

@@ -102,6 +102,14 @@ export type Bill = {
   received: number;
   change: number;
   status: "completed" | "void";
+  /** loyalty member this bill belongs to, and what loyalty did on it */
+  loyaltyCustomerId: string | null;
+  pointsRedeemed: number;
+  pointsDiscount: number;
+  rewardRef: string | null;
+  rewardName: string | null;
+  rewardDiscount: number;
+  pointsEarned: number;
   createdAt: number;
 };
 

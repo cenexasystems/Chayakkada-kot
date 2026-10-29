@@ -8,6 +8,7 @@ import Catalog from "./Catalog";
 import PrintModal, { PrintFormats } from "./PrintModal";
 import { Receipt, billText, waLink, type PrintFormat } from "./receipt";
 import { Badge, Btn, Icon, Modal, WaIcon, cx, fmtTime, ago } from "./kit";
+import { MemberStrip, RedeemBox, SavedLoyalty, earnPreview, loyaltyCalc, useLoyaltyLookup } from "./loyalty/billing";
 
 type Line = { key: number; productId: string | null; name: string; price: string; qty: number };
 
@@ -71,6 +72,10 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const [picking, setPicking] = useState(false); // "Pick from catalog" (multi-add) modal
   const [done, setDone] = useState<Bill | null>(null);
   const [busy, setBusy] = useState(false);
+  // loyalty: a reward ("v:REF" voucher or "r:id" catalogue reward) and points to redeem
+  const [lSel, setLSel] = useState("");
+  const [lPts, setLPts] = useState("");
+  const loyal = useLoyaltyLookup(phone, s.version);
 
   const f = mode === "tab" && sel ? floor.find((x) => x.session.id === sel) ?? null : null;
   const stale = f && sig && sigOf(f) !== sig;
@@ -92,6 +97,8 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     setReceived("");
     setSplitCash("");
     setSplitCard("");
+    setLSel("");
+    setLPts("");
     if (!keepMode) setMode("counter");
   };
 
@@ -100,6 +107,8 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     setLines(linesOf(x));
     setName(x.session.customerName);
     setPhone(x.session.customerPhone);
+    setLSel("");
+    setLPts("");
     setCoupon(x.session.couponCode ?? "");
     setSig(sigOf(x));
   };
@@ -122,7 +131,11 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     .filter((l) => l.name.trim() || Number(l.price) > 0)
     .map((l) => ({ productId: l.productId, name: l.name.trim(), price: Math.max(0, Number(l.price) || 0), qty: l.qty }));
   const cp = s.coupons.find((c) => c.code === coupon) ?? null;
-  const calc = computeBill({ items, coupon: cp, manualType: mType, manualValue: Number(mVal) || 0, extra: Number(extra) || 0, gst: isGst, gstPercent: Number(gstPct) || 0, phone });
+  const billIn = { items, coupon: cp, manualType: mType, manualValue: Number(mVal) || 0, extra: Number(extra) || 0, gst: isGst, gstPercent: Number(gstPct) || 0, phone };
+  const base = computeBill(billIn);
+  const loy = loyaltyCalc({ lk: loyal.lk, sel: lSel, pts: lPts, items, products: s.products, base });
+  const calc = loy.active ? computeBill({ ...billIn, rewardDiscount: loy.rewardDiscount, pointsDiscount: loy.pointsDiscount }) : base;
+  const earns = earnPreview(loyal.lk, items, s.products, calc.subtotal, calc.discount);
   const recv = Number(received) || 0;
   const change = pay === "cash" && recv > 0 ? recv - calc.total : 0;
 
@@ -142,6 +155,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   if (pay === "split" && (!(sCash > 0) || !(sCard > 0))) problems.push("Split payment: enter both the cash and the card amount.");
   else if (pay === "split" && splitOff !== 0) problems.push(`Split payment: cash + card should equal ${rupee(calc.total)}.`);
   if (phone && !okPhone(phone)) problems.push("Mobile should be a 10-digit number.");
+  problems.push(...loy.problems);
   const ready = !problems.length && !busy;
 
   const complete = async (via: "wa" | "print" | "none", fmt?: PrintFormat) => {
@@ -164,6 +178,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
       received,
       cashAmount: splitCash,
       cardAmount: splitCard,
+      ...loy.payload,
     });
     setBusy(false);
     if (!r.ok) {
@@ -288,9 +303,10 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               </label>
               <label>
                 <span className={lbl}>Mobile number (WhatsApp)</span>
-                <input className={cx(big, phone && !okPhone(phone) && "border-amber-500")} value={phone} onChange={(e) => setPhone(tenDigits(e.target.value))} placeholder="Enter 10-digit number" inputMode="numeric" autoComplete="tel-national" />
+                <input className={cx(big, phone && !okPhone(phone) && "border-amber-500")} value={phone} onChange={(e) => (setPhone(tenDigits(e.target.value)), setLSel(""), setLPts(""))} placeholder="Enter 10-digit number" inputMode="numeric" autoComplete="tel-national" />
               </label>
             </div>
+            <MemberStrip phone={phone} name={name} lk={loyal.lk} loading={loyal.loading} onEnrolled={loyal.reload} />
           </section>
 
           <section className={box}>
@@ -443,6 +459,8 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               </div>
             </div>
 
+            <RedeemBox lk={loyal.lk} sel={lSel} setSel={setLSel} pts={lPts} setPts={setLPts} info={loy} earn={earns} />
+
             <dl className="space-y-3 border-t border-dashed border-slate-200 pt-4 text-[14px]">
               <div className="flex justify-between">
                 <dt className="text-slate-600">
@@ -460,6 +478,18 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
                 <div className="flex justify-between text-red-600">
                   <dt>Discount</dt>
                   <dd className="font-semibold">-{rupee(calc.manualDiscount)}</dd>
+                </div>
+              )}
+              {calc.rewardDiscount > 0 && (
+                <div className="flex justify-between text-red-600">
+                  <dt>Reward · {loy.rewardName}</dt>
+                  <dd className="font-semibold">-{rupee(calc.rewardDiscount)}</dd>
+                </div>
+              )}
+              {calc.pointsDiscount > 0 && (
+                <div className="flex justify-between text-red-600">
+                  <dt>Loyalty points ({loy.points} pts)</dt>
+                  <dd className="font-semibold">-{rupee(calc.pointsDiscount)}</dd>
                 </div>
               )}
               <div className="flex items-center justify-between">
@@ -667,6 +697,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               {done.source === "tab" ? `${whoIs(done)}'s tab is closed.` : "Counter sale recorded."}
               {done.change > 0 && ` Give back ${rupee(done.change)} change.`}
             </p>
+            <SavedLoyalty bill={done} />
           </div>
         )}
       </Modal>

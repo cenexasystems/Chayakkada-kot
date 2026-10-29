@@ -76,8 +76,8 @@ export default function OrdersPage() {
 
   /* The bills on screen as an Excel workbook with real columns. */
   const exportRows = (): (string | number)[][] => [
-    ["Invoice", "Type", "Customer", "Mobile", "Items", "Subtotal", "Coupon", "Coupon discount", "Manual discount", "Extra", "Bill type", "GST %", "Taxable amount", "GST amount", "Total", "Payment", "Cash", "UPI", "Card", "Status", "Date", "Time"],
-    ...bills.map((b) => [b.invoiceNo, b.source, b.customerName, b.customerPhone, b.itemCount, b.subtotal, b.couponCode ?? "", b.couponDiscount, b.manualDiscount, b.extra, b.isGst ? "GST" : "Non-GST", b.gstPercent, b.taxableAmount, b.gstAmount, b.total, b.payment, b.cashAmount, b.upiAmount, b.cardAmount, b.status, fmtDate(b.createdAt), fmtTime(b.createdAt)]),
+    ["Invoice", "Type", "Customer", "Mobile", "Items", "Subtotal", "Coupon", "Coupon discount", "Manual discount", "Extra", "Bill type", "GST %", "Taxable amount", "GST amount", "Total", "Payment", "Cash", "UPI", "Card", "Status", "Date", "Time", "Reward", "Reward discount", "Points redeemed", "Points discount", "Points earned"],
+    ...bills.map((b) => [b.invoiceNo, b.source, b.customerName, b.customerPhone, b.itemCount, b.subtotal, b.couponCode ?? "", b.couponDiscount, b.manualDiscount, b.extra, b.isGst ? "GST" : "Non-GST", b.gstPercent, b.taxableAmount, b.gstAmount, b.total, b.payment, b.cashAmount, b.upiAmount, b.cardAmount, b.status, fmtDate(b.createdAt), fmtTime(b.createdAt), b.rewardName ?? "", b.rewardDiscount, b.pointsRedeemed, b.pointsDiscount, b.pointsEarned]),
   ];
   const stamp = () => new Date().toISOString().slice(0, 10);
   const exportExcel = () => downloadExcel(`bills-${stamp()}.xlsx`, [{ name: "Bills", rows: exportRows() }]);
@@ -309,6 +309,24 @@ export default function OrdersPage() {
                 <div className="flex justify-between text-red-600">
                   <dt>Discount{bill.manualType === "percent" ? ` (${bill.manualValue}%)` : ""}</dt>
                   <dd>-{rupee(bill.manualDiscount)}</dd>
+                </div>
+              )}
+              {bill.rewardDiscount > 0 && (
+                <div className="flex justify-between text-red-600">
+                  <dt>Reward {bill.rewardName}</dt>
+                  <dd>-{rupee(bill.rewardDiscount)}</dd>
+                </div>
+              )}
+              {bill.pointsDiscount > 0 && (
+                <div className="flex justify-between text-red-600">
+                  <dt>Loyalty points ({bill.pointsRedeemed} pts)</dt>
+                  <dd>-{rupee(bill.pointsDiscount)}</dd>
+                </div>
+              )}
+              {bill.pointsEarned > 0 && (
+                <div className="flex justify-between text-amber-700">
+                  <dt>Loyalty points earned</dt>
+                  <dd>{bill.pointsEarned} pts</dd>
                 </div>
               )}
               {bill.extra > 0 && (

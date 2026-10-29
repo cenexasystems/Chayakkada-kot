@@ -20,11 +20,14 @@ export function billText(b: Bill, shop: string, publicUrl = "") {
     `Subtotal (${b.itemCount} items): ${rupee(b.subtotal)}`,
     b.couponDiscount ? `Coupon ${b.couponCode} (${b.couponPercent}%): -${rupee(b.couponDiscount)}` : "",
     b.manualDiscount ? `Discount: -${rupee(b.manualDiscount)}` : "",
+    b.rewardDiscount ? `Reward ${b.rewardName ?? ""}: -${rupee(b.rewardDiscount)}` : "",
+    b.pointsDiscount ? `Loyalty points (${b.pointsRedeemed} pts): -${rupee(b.pointsDiscount)}` : "",
     b.extra ? `Extra charges: ${rupee(b.extra)}` : "",
     b.isGst ? `GST (${b.gstPercent}%) on ${rupee(b.taxableAmount)}: ${rupee(b.gstAmount)}` : "",
     `*Grand total: ${rupee(b.total)}*`,
     `Paid by ${PAY[b.payment]}`,
     b.payment === "split" ? `  Cash ${rupee(b.cashAmount)} · Card ${rupee(b.cardAmount)}` : "",
+    b.pointsEarned ? `You earned ${b.pointsEarned} loyalty points on this bill.` : "",
     "",
     `View your invoice: ${invoiceUrl(b, publicUrl)}`,
     "",
@@ -144,6 +147,18 @@ function Sheet({ b, shop, lines, size }: { b: Bill; shop: string; lines: string[
             <dd>-{rupee(b.manualDiscount)}</dd>
           </div>
         )}
+        {b.rewardDiscount > 0 && (
+          <div>
+            <dt>Reward {b.rewardName}</dt>
+            <dd>-{rupee(b.rewardDiscount)}</dd>
+          </div>
+        )}
+        {b.pointsDiscount > 0 && (
+          <div>
+            <dt>Loyalty points ({b.pointsRedeemed} pts)</dt>
+            <dd>-{rupee(b.pointsDiscount)}</dd>
+          </div>
+        )}
         {b.extra > 0 && (
           <div>
             <dt>Extra charges</dt>
@@ -232,6 +247,18 @@ function Thermal({ b, shop, lines, roll }: { b: Bill; shop: string; lines: strin
         <div className="row">
           <span>Discount</span>
           <span>-{rupee(b.manualDiscount)}</span>
+        </div>
+      )}
+      {b.rewardDiscount > 0 && (
+        <div className="row">
+          <span>Reward {b.rewardName}</span>
+          <span>-{rupee(b.rewardDiscount)}</span>
+        </div>
+      )}
+      {b.pointsDiscount > 0 && (
+        <div className="row">
+          <span>Loyalty points ({b.pointsRedeemed} pts)</span>
+          <span>-{rupee(b.pointsDiscount)}</span>
         </div>
       )}
       {b.extra > 0 && (

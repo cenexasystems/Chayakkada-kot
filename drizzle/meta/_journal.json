@@ -71,6 +71,13 @@
       "when": 1791500300000,
       "tag": "0009_coupon_sends",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791500400000,
+      "tag": "0010_loyalty",
+      "breakpoints": true
     }
   ]
 }

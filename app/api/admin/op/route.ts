@@ -23,6 +23,18 @@ const ADMIN_ONLY_OPS = new Set([
   "bill.void",
   "ingredient.delete",
   "recipe.delete",
+  // loyalty: staff may look up, enrol, redeem and issue rewards; settings and corrections are the owner's
+  "loyalty.update",
+  "loyalty.status",
+  "loyalty.adjust",
+  "loyalty.cancelVoucher",
+  "loyalty.refund",
+  "loyalty.grant",
+  "loyalty.config",
+  "loyalty.reward.save",
+  "loyalty.reward.delete",
+  "loyalty.campaign.save",
+  "loyalty.campaign.delete",
 ]);
 
 /* POST {op, ...args} → {result} */
@@ -33,6 +45,6 @@ export async function POST(req: Request) {
     const { op, ...args } = await body(req);
     const name = String(op);
     if (role !== "admin" && ADMIN_ONLY_OPS.has(name)) throw new ApiError("Only the admin can do that.", 403);
-    return { result: await adminOp(name, args) };
+    return { result: await adminOp(name, args, role) };
   });
 }

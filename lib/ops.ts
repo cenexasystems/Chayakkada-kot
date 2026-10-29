@@ -5,6 +5,7 @@ import { checkCoupon, computeBill, round2, shopToday } from "./money";
 import { hashPassword } from "./auth";
 import { db, type Db, type Tx } from "./db";
 import { batches, bills, coupons, expenseCategories, expenses, ingredientMoves, ingredients, meta, orders, products, recipes, sessions, settings, staffUsers, stockMovements } from "./db/schema";
+import * as L from "./loyalty/server";
 import type { AdminState, Bill, Ingredient, IngredientLedger, IngredientMove, IngredientMoveType, IngredientUnit, StockLedger, MenuItem, Order, OrderItem, OrderStatus, PayMethod, Product, PublicUser, Recipe, RecipeItem, Session, StaffUser, StockMoveType, TabClose, TabView, ShopDetails } from "./types";
 
 /* Every read/write the app makes, with validation. Route handlers are thin wrappers.
@@ -628,7 +629,7 @@ export function couponForPage(raw: unknown) {
   });
 }
 
-async function createBill(tx: Tx, a: Args): Promise<Bill> {
+async function createBill(tx: Tx, a: Args, actor = "admin"): Promise<Bill> {
   const now = Date.now();
   const source = a.source === "counter" ? "counter" : "tab";
   let s: Session | null = null;
@@ -665,8 +666,22 @@ async function createBill(tx: Tx, a: Args): Promise<Bill> {
   if (isGst && !(gstRaw >= 0 && gstRaw <= 100)) throw new ApiError("GST should be between 0 and 100%.");
   const phone = mobile(a.customerPhone);
   if (phone === null) throw new ApiError("Customer mobile should be a 10-digit number.");
-  const calc = computeBill({ items, coupon, manualType, manualValue, extra: num(a.extra) || 0, gst: isGst, gstPercent: isGst ? gstRaw : 0, phone: phone || s?.customerPhone });
-  if (coupon && calc.couponOk && !calc.couponOk.ok) throw new ApiError(`Coupon ${coupon.code}: ${calc.couponOk.reason}.`);
+  const billInput = { items, coupon, manualType, manualValue, extra: num(a.extra) || 0, gst: isGst, gstPercent: isGst ? gstRaw : 0, phone: phone || s?.customerPhone } as const;
+  const base = computeBill(billInput);
+  if (coupon && base.couponOk && !base.couponOk.ok) throw new ApiError(`Coupon ${coupon.code}: ${base.couponOk.reason}.`);
+  // loyalty points / reward asked for at the till — checked against the database, never the browser's numbers
+  const plan = await L.planBill(tx, {
+    phone: phone || s?.customerPhone || "",
+    items,
+    subtotal: base.subtotal,
+    afterManual: Math.max(0, base.subtotal - base.couponDiscount - base.manualDiscount),
+    couponApplied: base.couponDiscount > 0,
+    manualApplied: base.manualDiscount > 0,
+    points: a.loyaltyPoints,
+    rewardId: a.rewardId,
+    voucherRef: a.voucherRef,
+  });
+  const calc = plan ? computeBill({ ...billInput, rewardDiscount: plan.rewardDiscount, pointsDiscount: plan.pointsDiscount }) : base;
 
   const payment: PayMethod = a.payment === "upi" || a.payment === "card" || a.payment === "split" ? a.payment : "cash";
   const got = num(a.received);
@@ -739,10 +754,19 @@ async function createBill(tx: Tx, a: Args): Promise<Bill> {
       received,
       change: round2(received - calc.total),
       status: "completed",
+      loyaltyCustomerId: plan?.customer.id ?? null,
+      pointsRedeemed: plan && calc.pointsDiscount > 0 ? plan.points : 0,
+      pointsDiscount: calc.pointsDiscount,
+      rewardRef: plan?.reward && "voucher" in plan.reward ? plan.reward.voucher.ref : null,
+      rewardName: plan?.rewardName ?? null,
+      rewardDiscount: calc.rewardDiscount,
+      pointsEarned: 0,
       createdAt: now,
     })
     .returning();
   if (bill.couponCode && coupon) await tx.update(coupons).set({ used: sql`${coupons.used} + 1` }).where(eq(coupons.id, coupon.id));
+  // spend, earn, stamp — in this same transaction, so a failed bill leaves points untouched
+  const loyal = await L.afterBill(tx, bill, plan, actor);
 
   if (s) {
     // the tab's phone is its key, so a different one typed at billing goes on the bill only
@@ -752,7 +776,7 @@ async function createBill(tx: Tx, a: Args): Promise<Bill> {
       .set({ status: "served", updatedAt: now })
       .where(and(eq(orders.sessionId, s.id), inArray(orders.status, ["new", "preparing"])));
   }
-  return bill;
+  return loyal.customerId ? (await first(tx.select().from(bills).where(eq(bills.id, bill.id)))) ?? bill : bill;
 }
 
 /** The saved spelling of a category, adding it to the shop's list if it is new. */
@@ -763,7 +787,7 @@ async function ensureExpenseCategory(tx: Tx, name: string, now: number): Promise
   return name;
 }
 
-export function adminOp(op: string, a: Args) {
+export function adminOp(op: string, a: Args, role = "admin") {
   return mutate(async (tx) => {
     const now = Date.now();
     const id = str(a.id, 40);
@@ -1190,13 +1214,14 @@ export function adminOp(op: string, a: Args) {
 
       /* ---------- billing ---------- */
       case "bill.create":
-        return createBill(tx, a);
+        return createBill(tx, a, role);
       case "bill.delete": {
         const b = await must(tx.select().from(bills).where(eq(bills.id, id)), "Bill");
         // a completed bill still counts — put its stock and coupon use back, same as a void
         if (b.status === "completed") {
           await restock(tx, b.items, { type: "void_bill", ref: b.invoiceNo, note: "Bill deleted" });
           if (b.couponCode) await tx.update(coupons).set({ used: sql`greatest(0, ${coupons.used} - 1)` }).where(eq(coupons.code, b.couponCode));
+          await L.reverseBill(tx, b, role, 1, "Bill deleted");
         }
         await tx.delete(bills).where(eq(bills.id, b.id));
         return null;
@@ -1207,8 +1232,39 @@ export function adminOp(op: string, a: Args) {
         const [u] = await tx.update(bills).set({ status: "void" }).where(eq(bills.id, b.id)).returning();
         await restock(tx, b.items, { type: "void_bill", ref: b.invoiceNo, note: "Bill voided" });
         if (b.couponCode) await tx.update(coupons).set({ used: sql`greatest(0, ${coupons.used} - 1)` }).where(eq(coupons.code, b.couponCode));
+        await L.reverseBill(tx, b, role, 1, "Bill voided");
         return u;
       }
+
+      /* ---------- loyalty (lib/loyalty/server.ts) ---------- */
+      case "loyalty.register":
+        return L.registerCustomer(tx, a, role);
+      case "loyalty.update":
+        return L.updateCustomer(tx, a, role);
+      case "loyalty.status":
+        return L.setStatus(tx, a, role);
+      case "loyalty.adjust":
+        return L.adjustPoints(tx, a, role);
+      case "loyalty.issueReward":
+        return L.issueReward(tx, a, role);
+      case "loyalty.cancelVoucher":
+        return L.cancelVoucher(tx, a, role);
+      case "loyalty.refund":
+        return L.partialRefund(tx, a, role);
+      case "loyalty.grant":
+        return L.grant(tx, a, role);
+      case "loyalty.maintain":
+        return L.maintain(tx);
+      case "loyalty.config":
+        return L.saveConfig(tx, a, role);
+      case "loyalty.reward.save":
+        return L.saveReward(tx, a, role);
+      case "loyalty.reward.delete":
+        return L.deleteReward(tx, a, role);
+      case "loyalty.campaign.save":
+        return L.saveCampaign(tx, a, role);
+      case "loyalty.campaign.delete":
+        return L.deleteCampaign(tx, a, role);
     }
     throw new ApiError(`Unknown action: ${op}`);
   });
