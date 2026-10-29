@@ -22,6 +22,7 @@ export default function Crm({ d }: { d: LoyaltyState }) {
   const [members, setMembers] = useState<"" | "yes" | "no">("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [granting, setGranting] = useState(false);
+  const [msgTo, setMsgTo] = useState<{ phone: string; name: string } | null>(null);
 
   const all = useMemo(() => {
     const byPhone = new Map(d.customers.map((c) => [c.phone, c]));
@@ -156,9 +157,9 @@ export default function Crm({ d }: { d: LoyaltyState }) {
                       <td className={cx(td, "max-w-[220px] truncate text-[12px]")}>{r.fav.join(", ")}</td>
                       <td className={td}>
                         {(!r.m || r.m.consent) && (
-                          <a href={waLink(r.phone, `Hi ${r.name !== "—" ? r.name : ""}! We miss you at ${s.settings.shopName} — come by soon!`)} target="_blank" rel="noopener noreferrer" className="text-[12px] font-bold text-emerald-700 hover:underline">
+                          <button type="button" onClick={() => setMsgTo({ phone: r.phone, name: r.name !== "—" ? r.name : "" })} className="text-[12px] font-bold text-emerald-700 hover:underline">
                             WhatsApp
-                          </a>
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -171,7 +172,59 @@ export default function Crm({ d }: { d: LoyaltyState }) {
         </>
       )}
       {granting && <GrantModal ids={pickedMembers.map((c) => c.id)} label={seg ? SEGMENTS.find((x) => x.key === seg)!.label : "selected"} onClose={() => setGranting(false)} />}
+      {msgTo && <MessageModal to={msgTo} shop={s.settings.shopName} onClose={() => setMsgTo(null)} />}
     </div>
+  );
+}
+
+/* The customer message, editable before WhatsApp opens. The wording is remembered on
+   this device, with {name} and {shop} filled in for each customer. */
+const MSG_KEY = "clc-crm-message";
+const DEFAULT_MSG = "Hi {name}! We miss you at {shop} — come by soon!";
+
+function MessageModal({ to, shop, onClose }: { to: { phone: string; name: string }; shop: string; onClose: () => void }) {
+  const [tpl, setTpl] = useState(() => {
+    try {
+      return localStorage.getItem(MSG_KEY) || DEFAULT_MSG;
+    } catch {
+      return DEFAULT_MSG;
+    }
+  });
+  const text = tpl.replaceAll("{name}", to.name).replaceAll("{shop}", shop).replace(/Hi !/, "Hi!").trim();
+  const send = () => {
+    try {
+      localStorage.setItem(MSG_KEY, tpl);
+    } catch {}
+    window.open(waLink(to.phone, text), "_blank", "noopener,noreferrer");
+    onClose();
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Message ${to.name || to.phone}`}
+      footer={
+        <>
+          <Btn kind="plain" onClick={() => setTpl(DEFAULT_MSG)}>
+            Reset wording
+          </Btn>
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn kind="green" disabled={!text} onClick={send}>
+            Open WhatsApp
+          </Btn>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field label="Message" hint="{name} and {shop} are filled in for each customer. Your wording is remembered for next time.">
+          <textarea className={cx(inputLineCls, "h-32 resize-y py-2.5 leading-relaxed")} value={tpl} maxLength={1000} onChange={(e) => setTpl(e.target.value)} />
+        </Field>
+        <div>
+          <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Preview</span>
+          <p className="whitespace-pre-wrap rounded-xl bg-emerald-50 px-3.5 py-2.5 text-[13px] text-slate-800">{text || "—"}</p>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
