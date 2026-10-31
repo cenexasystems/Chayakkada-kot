@@ -11,6 +11,25 @@ export const rupee = (n: number) => `₹${inr.format(Math.round(n * 100) / 100)}
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
 
+type Paid = { payment: "cash" | "upi" | "card" | "split"; cashAmount: number; upiAmount: number; cardAmount: number };
+
+/** How a bill was paid, part by part — a split can be any mix of cash, UPI and card. */
+export function payParts(b: Paid): [string, number][] {
+  const all: [string, number][] = [
+    ["Cash", b.cashAmount],
+    ["UPI", b.upiAmount],
+    ["Card", b.cardAmount],
+  ];
+  return all.filter(([, n]) => n > 0);
+}
+
+/** "Cash", "UPI", "Card", or for a split the methods used, e.g. "Cash + UPI". */
+export function payLabel(b: Paid): string {
+  if (b.payment !== "split") return { cash: "Cash", upi: "UPI", card: "Card" }[b.payment];
+  const parts = payParts(b);
+  return parts.length ? parts.map(([m]) => m).join(" + ") : "Split";
+}
+
 /** YYYY-MM-DD for "today" in the shop's timezone. */
 export function shopToday(now = Date.now()) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);

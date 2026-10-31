@@ -62,7 +62,7 @@ export type Order = {
 };
 
 export type BillSource = "tab" | "counter";
-/** "split" = part cash, part card; cashAmount / cardAmount on the bill say how much each. */
+/** "split" = paid with two or more of cash, UPI and card; cashAmount / upiAmount / cardAmount say how much each. */
 export type PayMethod = "cash" | "upi" | "card" | "split";
 export type DiscountType = "amount" | "percent";
 /** Who applied the coupon on a bill: the guest from their phone, or staff at billing. */

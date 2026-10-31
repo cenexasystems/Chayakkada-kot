@@ -1,8 +1,7 @@
 import type { Bill, ShopDetails } from "@/lib/types";
-import { rupee } from "@/lib/money";
+import { payLabel, payParts, rupee } from "@/lib/money";
 import { fmtDateTime } from "./kit";
 
-const PAY = { cash: "Cash", upi: "UPI", card: "Card", split: "Cash + Card" } as const;
 
 /** Public link to the printable invoice page. */
 export const invoiceUrl = (b: Bill, publicUrl = "") => `${(publicUrl || (typeof window !== "undefined" ? window.location.origin : "")).replace(/\/$/, "")}/invoice/${b.id}`;
@@ -25,8 +24,8 @@ export function billText(b: Bill, shop: string, publicUrl = "") {
     b.extra ? `Extra charges: ${rupee(b.extra)}` : "",
     b.isGst ? `GST (${b.gstPercent}%) on ${rupee(b.taxableAmount)}: ${rupee(b.gstAmount)}` : "",
     `*Grand total: ${rupee(b.total)}*`,
-    `Paid by ${PAY[b.payment]}`,
-    b.payment === "split" ? `  Cash ${rupee(b.cashAmount)} · Card ${rupee(b.cardAmount)}` : "",
+    `Paid by ${payLabel(b)}`,
+    b.payment === "split" ? `  ${payParts(b).map(([m, n]) => `${m} ${rupee(n)}`).join(" · ")}` : "",
     b.pointsEarned ? `You earned ${b.pointsEarned} loyalty points on this bill.` : "",
     "",
     `View your invoice: ${invoiceUrl(b, publicUrl)}`,
@@ -101,7 +100,7 @@ function Sheet({ b, shop, lines, size }: { b: Bill; shop: string; lines: string[
         <div className="inv__r">
           <span>{b.source === "tab" ? "Customer" : "Counter"}</span>
           <b>{b.customerPhone || "Walk-in"}</b>
-          <p>Paid by {PAY[b.payment]}</p>
+          <p>Paid by {payLabel(b)}</p>
         </div>
       </section>
 
@@ -176,19 +175,15 @@ function Sheet({ b, shop, lines, size }: { b: Bill; shop: string; lines: string[
           <dd>{rupee(b.total)}</dd>
         </div>
         {b.payment === "split" ? (
-          <>
-            <div>
-              <dt>Received · Cash</dt>
-              <dd>{rupee(b.cashAmount)}</dd>
+          payParts(b).map(([m, n]) => (
+            <div key={m}>
+              <dt>Received · {m}</dt>
+              <dd>{rupee(n)}</dd>
             </div>
-            <div>
-              <dt>Received · Card</dt>
-              <dd>{rupee(b.cardAmount)}</dd>
-            </div>
-          </>
+          ))
         ) : (
           <div>
-            <dt>Received · {PAY[b.payment]}</dt>
+            <dt>Received · {payLabel(b)}</dt>
             <dd>{rupee(b.received)}</dd>
           </div>
         )}
@@ -279,19 +274,15 @@ function Thermal({ b, shop, lines, roll }: { b: Bill; shop: string; lines: strin
         <span>{rupee(b.total)}</span>
       </div>
       {b.payment === "split" ? (
-        <>
-          <div className="row">
-            <span>Paid · Cash</span>
-            <span>{rupee(b.cashAmount)}</span>
+        payParts(b).map(([m, n]) => (
+          <div key={m} className="row">
+            <span>Paid · {m}</span>
+            <span>{rupee(n)}</span>
           </div>
-          <div className="row">
-            <span>Paid · Card</span>
-            <span>{rupee(b.cardAmount)}</span>
-          </div>
-        </>
+        ))
       ) : (
         <div className="row">
-          <span>Paid · {PAY[b.payment]}</span>
+          <span>Paid · {payLabel(b)}</span>
           <span>{rupee(b.received)}</span>
         </div>
       )}

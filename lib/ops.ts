@@ -688,15 +688,19 @@ async function createBill(tx: Tx, a: Args, actor = "admin"): Promise<Bill> {
   const received = payment === "cash" && got > 0 ? round2(got) : calc.total;
   if (received < calc.total) throw new ApiError(`Amount received is less than the grand total.`);
 
-  // How the total was tendered (change is never part of it). A split names both amounts.
+  // How the total was tendered (change is never part of it). A split names each part —
+  // any two or all three of cash, UPI and card.
   let cashAmount = payment === "cash" ? calc.total : 0;
   let cardAmount = payment === "card" ? calc.total : 0;
-  const upiAmount = payment === "upi" ? calc.total : 0;
+  let upiAmount = payment === "upi" ? calc.total : 0;
   if (payment === "split") {
-    cashAmount = round2(num(a.cashAmount));
-    cardAmount = round2(num(a.cardAmount));
-    if (!(cashAmount > 0) || !(cardAmount > 0)) throw new ApiError("Split payment needs both a cash and a card amount.");
-    if (round2(cashAmount + cardAmount) !== calc.total) throw new ApiError("Cash and card must add up to the grand total.");
+    const part = (v: unknown) => (v === undefined || v === null || v === "" ? 0 : round2(num(v)));
+    cashAmount = part(a.cashAmount);
+    upiAmount = part(a.upiAmount);
+    cardAmount = part(a.cardAmount);
+    if (![cashAmount, upiAmount, cardAmount].every((n) => n >= 0)) throw new ApiError("Split amounts can't be negative.");
+    if ([cashAmount, upiAmount, cardAmount].filter((n) => n > 0).length < 2) throw new ApiError("Split payment needs amounts for at least two of cash, UPI and card.");
+    if (round2(cashAmount + upiAmount + cardAmount) !== calc.total) throw new ApiError("The split amounts must add up to the grand total.");
   }
 
   // Stock: tab orders already took stock when they were placed, so only the

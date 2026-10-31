@@ -174,7 +174,7 @@ export function gstReport(bills: Bill[]) {
   };
 }
 
-/** Money taken per method. A split bill adds its cash part to Cash and its card part to Card. */
+/** Money taken per method. A split bill adds each part to its own method. */
 export function paymentStats(bills: Bill[]) {
   let cash = 0, upi = 0, card = 0, splitN = 0;
   for (const b of bills) {

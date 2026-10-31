@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { Bill } from "@/lib/types";
-import { rupee } from "@/lib/money";
+import { payLabel, payParts, rupee } from "@/lib/money";
 import { inRange, rangeOf, type Period } from "@/lib/analytics";
 import { useAdmin } from "./Store";
 import { billText, waLink } from "./receipt";
@@ -12,7 +12,6 @@ import { Badge, Btn, Empty, Icon, Modal, Page, PageHead, SearchBox, WaIcon, cx, 
 
 type DateF = Extract<Period, "today" | "week" | "month" | "custom"> | "any";
 
-const PAY = { cash: "Cash", upi: "UPI", card: "Card", split: "Cash + Card" } as const;
 
 const th = "px-3 py-4 text-left text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500 whitespace-nowrap";
 const td = "px-3 py-4 text-[13px] whitespace-nowrap";
@@ -184,7 +183,7 @@ export default function OrdersPage() {
                     <td className={cx(td, "adm-num text-slate-600")}>{b.customerPhone || <span className="text-slate-400">—</span>}</td>
                     <td className={td}>{b.source === "tab" ? <Badge tone="orange">Customer tab</Badge> : <Badge tone="sky">Counter</Badge>}</td>
                     <td className={cx(td, "font-bold text-slate-900")}>{rupee(b.total)}</td>
-                    <td className={cx(td, "text-slate-600")}>{PAY[b.payment]}</td>
+                    <td className={cx(td, "text-slate-600")}>{payLabel(b)}</td>
                     <td className={cx(td, "text-slate-600")}>{fmtDate(b.createdAt)}</td>
                     <td className={cx(td, "text-center")}>{b.status === "completed" ? <Badge tone="green">Completed</Badge> : <Badge tone="slate">Void</Badge>}</td>
                     <td className={cx(td, "text-right")}>
@@ -351,12 +350,18 @@ export default function OrdersPage() {
                 <dd className="adm-num font-extrabold">{rupee(bill.total)}</dd>
               </div>
               <div className="flex justify-between text-slate-500">
-                <dt>Paid · {PAY[bill.payment]}</dt>
+                <dt>Paid · {payLabel(bill)}</dt>
                 <dd>
                   {rupee(bill.received)}
                   {bill.change > 0 && ` (change ${rupee(bill.change)})`}
                 </dd>
               </div>
+              {bill.payment === "split" && (
+                <div className="flex justify-between text-[12px] text-slate-400">
+                  <dt>Split</dt>
+                  <dd>{payParts(bill).map(([m, n]) => `${m} ${rupee(n)}`).join(" · ")}</dd>
+                </div>
+              )}
             </dl>
           </div>
         )}

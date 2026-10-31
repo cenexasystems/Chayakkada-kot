@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Bill, Coupon, DiscountType, OrderItem, PayMethod } from "@/lib/types";
-import { checkCoupon, computeBill, couponStatus, mergeItems, rupee } from "@/lib/money";
+import { checkCoupon, computeBill, couponStatus, mergeItems, round2, rupee } from "@/lib/money";
 import { useAdmin, whoIs, type FloorTab } from "./Store";
 import Catalog from "./Catalog";
 import PrintModal, { PrintFormats } from "./PrintModal";
@@ -65,6 +65,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const [received, setReceived] = useState("");
   const [splitCash, setSplitCash] = useState("");
   const [splitCard, setSplitCard] = useState("");
+  const [splitUpi, setSplitUpi] = useState("");
   const [saveOpen, setSaveOpen] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [printFor, setPrintFor] = useState<Bill | null>(null);
@@ -97,6 +98,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     setReceived("");
     setSplitCash("");
     setSplitCard("");
+    setSplitUpi("");
     setLSel("");
     setLPts("");
     if (!keepMode) setMode("counter");
@@ -139,11 +141,12 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const recv = Number(received) || 0;
   const change = pay === "cash" && recv > 0 ? recv - calc.total : 0;
 
-  /* typing one half of a split fills the other with whatever is left of the total */
-  const rest = (v: string) => (v === "" ? "" : String(Math.max(0, Math.round((calc.total - (Number(v) || 0)) * 100) / 100)));
+  /* a split is any mix of cash, UPI and card; each box can take "the rest" in one tap */
   const sCash = Number(splitCash) || 0;
+  const sUpi = Number(splitUpi) || 0;
   const sCard = Number(splitCard) || 0;
-  const splitOff = Math.round((calc.total - sCash - sCard) * 100) / 100;
+  const splitOff = round2(calc.total - sCash - sUpi - sCard);
+  const splitUsed = [sCash, sUpi, sCard].filter((n) => n > 0).length;
 
   const problems: string[] = [];
   if (mode === "tab" && !f) problems.push("Pick a customer with an open tab.");
@@ -152,8 +155,8 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   if (cp && calc.couponOk && !calc.couponOk.ok) problems.push(`Coupon ${cp.code}: ${calc.couponOk.reason}.`);
   if (isGst && !(gstPct !== "" && Number(gstPct) >= 0 && Number(gstPct) <= 100)) problems.push("GST should be a percentage between 0 and 100.");
   if (pay === "cash" && recv > 0 && recv < calc.total) problems.push("Amount received is less than the total.");
-  if (pay === "split" && (!(sCash > 0) || !(sCard > 0))) problems.push("Split payment: enter both the cash and the card amount.");
-  else if (pay === "split" && splitOff !== 0) problems.push(`Split payment: cash + card should equal ${rupee(calc.total)}.`);
+  if (pay === "split" && splitUsed < 2) problems.push("Split payment: enter amounts for at least two of cash, UPI and card.");
+  else if (pay === "split" && splitOff !== 0) problems.push(`Split payment: the parts should add up to ${rupee(calc.total)}.`);
   if (phone && !okPhone(phone)) problems.push("Mobile should be a 10-digit number.");
   problems.push(...loy.problems);
   const ready = !problems.length && !busy;
@@ -177,6 +180,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
       payment: pay,
       received,
       cashAmount: splitCash,
+      upiAmount: splitUpi,
       cardAmount: splitCard,
       ...loy.payload,
     });
@@ -563,18 +567,29 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
                 </>
               ) : pay === "split" ? (
                 <div className="space-y-2">
-                  <p className="text-[12.5px] text-slate-500">Customer pays part in cash and part by card — enter how much of each.</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label>
-                      <span className="mb-1 block text-[12px] font-bold text-slate-700">Cash (₹)</span>
-                      <input type="number" min={0} inputMode="decimal" placeholder="0.00" className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[16px] font-bold outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" value={splitCash} onChange={(e) => (setSplitCash(e.target.value), setSplitCard(rest(e.target.value)))} />
-                    </label>
-                    <label>
-                      <span className="mb-1 block text-[12px] font-bold text-slate-700">Card (₹)</span>
-                      <input type="number" min={0} inputMode="decimal" placeholder="0.00" className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[16px] font-bold outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" value={splitCard} onChange={(e) => (setSplitCard(e.target.value), setSplitCash(rest(e.target.value)))} />
-                    </label>
+                  <p className="text-[12.5px] text-slate-500">Customer pays with two or more methods — enter how much of each. Tap “rest” to put the remaining amount in that box.</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        ["Cash", splitCash, setSplitCash, sCash],
+                        ["UPI", splitUpi, setSplitUpi, sUpi],
+                        ["Card", splitCard, setSplitCard, sCard],
+                      ] as const
+                    ).map(([label, val, set, n]) => (
+                      <label key={label} className="min-w-0">
+                        <span className="mb-1 flex items-center justify-between gap-1 text-[12px] font-bold text-slate-700">
+                          {label} (₹)
+                          {splitOff > 0 && (
+                            <button type="button" onClick={(e) => (e.preventDefault(), set(String(round2(n + splitOff))))} className="text-[11px] font-extrabold text-red-600 hover:underline">
+                              rest
+                            </button>
+                          )}
+                        </span>
+                        <input type="number" min={0} inputMode="decimal" placeholder="0.00" className="h-12 w-full min-w-0 rounded-xl border border-slate-300 px-3 text-[16px] font-bold outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100" value={val} onChange={(e) => set(e.target.value)} />
+                      </label>
+                    ))}
                   </div>
-                  {(sCash > 0 || sCard > 0) && (
+                  {(sCash > 0 || sUpi > 0 || sCard > 0) && (
                     <p className={cx("flex justify-between text-[13px] font-semibold", splitOff === 0 ? "text-emerald-600" : "text-red-600")}>
                       <span>{splitOff === 0 ? "Adds up to the total" : splitOff > 0 ? "Still to collect" : "Over by"}</span>
                       <span>{splitOff === 0 ? rupee(calc.total) : rupee(Math.abs(splitOff))}</span>

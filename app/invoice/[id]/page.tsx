@@ -1,13 +1,12 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { billForInvoice } from "@/lib/ops";
-import { TZ } from "@/lib/money";
+import { TZ, payLabel, payParts } from "@/lib/money";
 import { InvoiceActions } from "./InvoiceActions";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Invoice", robots: { index: false } };
 
-const PAY = { cash: "Cash", upi: "UPI", card: "Card", split: "Cash + Card" } as const;
 const inr = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // Indian-style number to words (lakh / crore)
@@ -107,7 +106,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               <div>
                 <span className="text-zinc-400">Payment: </span>
                 <span className="font-medium text-zinc-800 uppercase">
-                  {PAY[b.payment]} • {b.status === "void" ? "Void" : "Paid"}
+                  {payLabel(b)} • {b.status === "void" ? "Void" : "Paid"}
                 </span>
               </div>
               <div>
@@ -164,14 +163,12 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             </div>
             {b.payment === "split" && (
               <div className="space-y-0.5 pt-1 text-xs text-zinc-600">
-                <div>
-                  <span className="text-zinc-400">Paid in Cash: </span>
-                  <span className="font-mono font-medium text-zinc-800">₹{inr(b.cashAmount)}</span>
-                </div>
-                <div>
-                  <span className="text-zinc-400">Paid by Card: </span>
-                  <span className="font-mono font-medium text-zinc-800">₹{inr(b.cardAmount)}</span>
-                </div>
+                {payParts(b).map(([m, n]) => (
+                  <div key={m}>
+                    <span className="text-zinc-400">Paid by {m}: </span>
+                    <span className="font-mono font-medium text-zinc-800">₹{inr(n)}</span>
+                  </div>
+                ))}
               </div>
             )}
             {b.payment === "cash" && b.received > 0 && (
