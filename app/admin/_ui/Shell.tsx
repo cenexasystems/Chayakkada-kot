@@ -21,7 +21,6 @@ const NAV: Nav[] = [
   { href: "/admin/inventory/ingredient-moves", label: "Ingredient log", icon: "list", roles: ["admin", "staff"] },
   { href: "/admin/inventory/movements", label: "Stock movement", icon: "list", roles: ["admin"] },
   { href: "/admin/expenses", label: "Expenses", icon: "bag", roles: ["admin"] },
-  { href: "/admin/suppliers", label: "Suppliers", icon: "users", roles: ["admin"] },
   { href: "/admin/activity", label: "Activity log", icon: "list", roles: ["admin"] },
   { href: "/admin/coupons", label: "Coupons", icon: "coupon", roles: ["admin"] },
   { href: "/admin/loyalty", label: "Loyalty", icon: "star", roles: ["admin", "staff"] },
