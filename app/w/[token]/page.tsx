@@ -39,6 +39,7 @@ export default async function WalletPage({ params }: { params: Promise<{ token: 
       <div className="mx-auto max-w-md space-y-4">
         <div className="overflow-hidden rounded-3xl bg-slate-900 text-white shadow-xl">
           <div className="p-6">
+            {w.logoUrl && <img src={w.logoUrl} alt="" style={{ height: 44, width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: 10, display: "block" }} />}
             <p className="text-[12px] font-extrabold uppercase tracking-[0.2em] text-red-300">{w.shopName} loyalty</p>
             <p className="mt-1 text-[18px] font-bold">{c.name}</p>
             <p className="font-mono text-[12px] text-slate-400">{c.code}</p>

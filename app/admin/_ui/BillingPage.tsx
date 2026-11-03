@@ -72,11 +72,14 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const [picker, setPicker] = useState<number | null>(null);
   const [picking, setPicking] = useState(false); // "Pick from catalog" (multi-add) modal
   const [done, setDone] = useState<Bill | null>(null);
+  const [tierBefore, setTierBefore] = useState(""); // the member's tier before this bill, to spot an upgrade
   const [busy, setBusy] = useState(false);
   // loyalty: a reward ("v:REF" voucher or "r:id" catalogue reward) and points to redeem
   const [lSel, setLSel] = useState("");
   const [lPts, setLPts] = useState("");
   const loyal = useLoyaltyLookup(phone, s.version);
+  // an active loyalty member decides which audience of coupons applies
+  const member = loyal.lk?.customer?.status === "active";
 
   const f = mode === "tab" && sel ? floor.find((x) => x.session.id === sel) ?? null : null;
   const stale = f && sig && sigOf(f) !== sig;
@@ -133,7 +136,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     .filter((l) => l.name.trim() || Number(l.price) > 0)
     .map((l) => ({ productId: l.productId, name: l.name.trim(), price: Math.max(0, Number(l.price) || 0), qty: l.qty }));
   const cp = s.coupons.find((c) => c.code === coupon) ?? null;
-  const billIn = { items, coupon: cp, manualType: mType, manualValue: Number(mVal) || 0, extra: Number(extra) || 0, gst: isGst, gstPercent: Number(gstPct) || 0, phone };
+  const billIn = { items, coupon: cp, manualType: mType, manualValue: Number(mVal) || 0, extra: Number(extra) || 0, gst: isGst, gstPercent: Number(gstPct) || 0, phone, member };
   const base = computeBill(billIn);
   const loy = loyaltyCalc({ lk: loyal.lk, sel: lSel, pts: lPts, items, products: s.products, base });
   const calc = loy.active ? computeBill({ ...billIn, rewardDiscount: loy.rewardDiscount, pointsDiscount: loy.pointsDiscount }) : base;
@@ -194,6 +197,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     if (via === "print") print(<Receipt b={b} shop={shop} details={s.settings} fmt={fmt} />);
     setSaveOpen(false);
     setPrinting(false);
+    setTierBefore(loyal.lk?.customer?.tier ?? "");
     setDone(b);
     reset();
   };
@@ -438,13 +442,21 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               {f?.session.couponCode && f.session.couponCode === coupon && <p className="mb-2 text-[12px] font-semibold text-sky-600">Applied by the guest from their phone.</p>}
               <select className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-[14px] font-semibold text-slate-800 outline-none focus:border-slate-400" value={coupon} onChange={(e) => setCoupon(e.target.value)}>
                 <option value="">No Coupon</option>
-                {couponOptions.map((c) => {
-                  const ok = checkCoupon(c, calc.subtotal, phone);
+                {(["all", "regular", "loyalty"] as const).map((aud) => {
+                  const group = couponOptions.filter((c) => c.audience === aud);
+                  if (!group.length) return null;
                   return (
-                    <option key={c.id} value={c.code} disabled={!ok.ok && c.code !== coupon}>
-                      {c.code} — {c.percent}% off{c.minOrder ? ` (min ${rupee(c.minOrder)})` : ""}
-                      {!ok.ok ? ` · ${ok.reason}` : ""}
-                    </option>
+                    <optgroup key={aud} label={{ all: "Everyone", regular: "Non-loyalty customers", loyalty: "Loyalty members" }[aud]}>
+                      {group.map((c) => {
+                        const ok = checkCoupon(c, calc.subtotal, phone, member);
+                        return (
+                          <option key={c.id} value={c.code} disabled={!ok.ok && c.code !== coupon}>
+                            {c.code} — {c.percent}% off{c.minOrder ? ` (min ${rupee(c.minOrder)})` : ""}
+                            {!ok.ok ? ` · ${ok.reason}` : ""}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
                   );
                 })}
               </select>
@@ -616,14 +628,39 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
       <Catalog
         open={picker !== null}
         onClose={() => setPicker(null)}
-        title="Swap this line"
-        onPick={(p) => picker !== null && setLine(picker, { productId: p.id, name: p.name, price: String(p.price) })}
+        title="Swap this line — pick one or more"
+        addLabel="OK"
+        onAdd={(picks) => {
+          /* Tick as many items as you like, then OK: the first one takes the place of the
+             line being swapped and the rest are added to the bill — merged into a line
+             that already has the same item, otherwise as new lines. */
+          const at = picker;
+          setLines((ls) => {
+            let next = [...ls];
+            picks.forEach(({ productId, qty }, n) => {
+              const prod = s.products.find((x) => x.id === productId);
+              if (!prod) return;
+              const same = next.findIndex((l) => l.productId === prod.id && !(n === 0 && l.key === at));
+              if (same >= 0) {
+                next[same] = { ...next[same], qty: Math.min(999, next[same].qty + qty) };
+                if (n === 0 && at !== null && next.length > 1) next = next.filter((l) => l.key !== at); // the swapped line folded into the existing one
+                return;
+              }
+              const line: Line = { key: ++seq, productId: prod.id, name: prod.name, price: String(prod.price), qty };
+              const i = n === 0 && at !== null ? next.findIndex((l) => l.key === at) : -1;
+              if (i >= 0) next[i] = { ...line, key: next[i].key };
+              else next.push(line);
+            });
+            return next;
+          });
+          return true;
+        }}
       />
       <Catalog
         open={picking}
         onClose={() => setPicking(false)}
         title="Pick items for this bill"
-        addLabel="Add to bill"
+        addLabel="OK"
         onAdd={(picks) => {
           /* Each pick is a {productId, qty} from the catalog cart. For items
              the bill already has, bump the qty; otherwise add a fresh line.
@@ -712,7 +749,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               {done.source === "tab" ? `${whoIs(done)}'s tab is closed.` : "Counter sale recorded."}
               {done.change > 0 && ` Give back ${rupee(done.change)} change.`}
             </p>
-            <SavedLoyalty bill={done} />
+            <SavedLoyalty bill={done} tierBefore={tierBefore} />
           </div>
         )}
       </Modal>

@@ -40,9 +40,12 @@ export type CouponCheck = { ok: true } | { ok: false; reason: string };
 /** Last 10 digits of a mobile, for comparing against the phones a coupon was sent to. */
 export const last10 = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "").slice(-10);
 
-/** `phone` is the customer's mobile; a coupon locked to the phones it was sent to needs it. */
-export function checkCoupon(c: Coupon, subtotal: number, phone?: string | null, now = Date.now()): CouponCheck {
+/** `phone` is the customer's mobile; a coupon locked to the phones it was sent to needs it.
+    `member` is whether that mobile is an active loyalty member (false/null = not). */
+export function checkCoupon(c: Coupon, subtotal: number, phone?: string | null, member?: boolean | null, now = Date.now()): CouponCheck {
   if (!c.active) return { ok: false, reason: "Paused" };
+  if (c.audience === "loyalty" && !member) return { ok: false, reason: last10(phone) ? "For loyalty members only" : "For loyalty members only — enter their mobile" };
+  if (c.audience === "regular" && member) return { ok: false, reason: "For non-loyalty customers only" };
   if (c.restricted) {
     const p = last10(phone);
     if (!p) return { ok: false, reason: "Only for the customer it was sent to — enter their mobile" };
@@ -72,16 +75,18 @@ export type BillInput = {
   gstPercent?: number;
   /** customer's mobile — checked against coupons locked to certain phones */
   phone?: string | null;
+  /** whether that mobile is an active loyalty member — for coupons meant for members / non-members */
+  member?: boolean | null;
   /** loyalty: a reward's value and the rupee value of redeemed points, both worked out
       (and checked) by lib/loyalty — they come off after the coupon and manual discount */
   rewardDiscount?: number;
   pointsDiscount?: number;
 };
 
-export function computeBill({ items, coupon, manualType, manualValue, extra, gst = false, gstPercent = 0, phone, rewardDiscount = 0, pointsDiscount = 0 }: BillInput) {
+export function computeBill({ items, coupon, manualType, manualValue, extra, gst = false, gstPercent = 0, phone, member, rewardDiscount = 0, pointsDiscount = 0 }: BillInput) {
   const subtotal = round2(items.reduce((s, i) => s + i.price * i.qty, 0));
   const itemCount = items.reduce((s, i) => s + i.qty, 0);
-  const couponOk = coupon ? checkCoupon(coupon, subtotal, phone) : null;
+  const couponOk = coupon ? checkCoupon(coupon, subtotal, phone, member) : null;
   const couponDiscount = coupon && couponOk?.ok ? Math.round((subtotal * coupon.percent) / 100) : 0;
   const afterCoupon = Math.max(0, subtotal - couponDiscount);
   const mv = Math.max(0, Number(manualValue) || 0);

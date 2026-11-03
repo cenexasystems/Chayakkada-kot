@@ -8,6 +8,7 @@ import type { RewardKind } from "@/lib/loyalty/config";
 import { useAdmin } from "../Store";
 import { waLink } from "../receipt";
 import { Badge, Btn, Empty, Field, Modal, SearchBox, cx, downloadExcel, fmtDate, inputLineCls } from "../kit";
+import { OfferSend } from "./OfferSend";
 import { Pager, Stat, TierBadge, tableWrap, td, th, usePaged, useStatsByPhone } from "./shared";
 
 const DAY = 86_400_000;
@@ -232,15 +233,28 @@ function GrantModal({ ids, label, onClose }: { ids: string[]; label: string; onC
   const { s, act, toast } = useAdmin();
   const [f, setF] = useState({ reason: "", points: "", kind: "" as RewardKind | "", rewardName: "", value: "", productId: "", validityDays: "30" });
   const [busy, setBusy] = useState(false);
+  const [tell, setTell] = useState(false);
   const go = async () => {
     setBusy(true);
     const r = await act<{ customers: number }>("loyalty.grant", { customerIds: ids, ...f, kind: f.kind || null });
     setBusy(false);
     if (r.ok) {
       toast({ kind: "ok", title: `Sent to ${r.result.customers} members` });
-      onClose();
+      setTell(true); // next: tell them on WhatsApp
     }
   };
+  if (tell) {
+    const pts = Number(f.points) || 0;
+    return (
+      <OfferSend
+        title="Tell these members on WhatsApp"
+        who="this gift"
+        template={`Hi {name}! 🎁 {shop} has added a gift to your loyalty account: ${f.reason.trim()}.${pts ? ` +${pts} bonus points.` : ""}${f.kind ? ` You also get: ${f.rewardName.trim() || "a reward"}.` : ""} See it in your wallet.`}
+        filter={({ customer }) => ids.includes(customer.id)}
+        onClose={onClose}
+      />
+    );
+  }
   return (
     <Modal open onClose={onClose} title={`Targeted campaign · ${ids.length} ${label} members`} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind="red" disabled={busy || !f.reason.trim() || (!Number(f.points) && !f.kind)} onClick={go}>{busy ? "Sending…" : "Give to all"}</Btn></>}>
       <div className="grid gap-3 sm:grid-cols-2">

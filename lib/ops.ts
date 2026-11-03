@@ -4,9 +4,11 @@ import { code, uid } from "./seed";
 import { checkCoupon, computeBill, round2, shopToday } from "./money";
 import { hashPassword } from "./auth";
 import { db, type Db, type Tx } from "./db";
-import { batches, bills, coupons, expenseCategories, expenses, ingredientMoves, ingredients, meta, orders, products, recipes, sessions, settings, staffUsers, stockMovements } from "./db/schema";
+import { batches, bills, coupons, expenseCategories, expenses, ingredientMoves, ingredients, meta, orders, products, recipes, sessions, settings, staffUsers, stockMovements, supplierInvoices, suppliers, approvalRequests, activityLog, loyaltyCustomers, loyaltyRewards, loyaltyCampaigns, productCategories } from "./db/schema";
 import * as L from "./loyalty/server";
-import type { AdminState, Bill, Ingredient, IngredientLedger, IngredientMove, IngredientMoveType, IngredientUnit, StockLedger, MenuItem, Order, OrderItem, OrderStatus, PayMethod, Product, PublicUser, Recipe, RecipeItem, Session, StaffUser, StockMoveType, TabClose, TabView, ShopDetails } from "./types";
+import { pointsPerUnit } from "./loyalty/engine";
+import type { LoyaltyConfig } from "./loyalty/config";
+import { INGREDIENT_UNITS, type AdminState, Bill, Ingredient, IngredientLedger, IngredientMove, IngredientMoveType, IngredientUnit, StockLedger, MenuItem, Order, OrderItem, OrderStatus, PayMethod, Product, PublicUser, Recipe, RecipeItem, Session, StaffUser, StockMoveType, TabClose, TabView, ShopDetails } from "./types";
 
 /* Every read/write the app makes, with validation. Route handlers are thin wrappers.
    Writes run inside store.mutate(), which serializes them and rolls back on error. */
@@ -67,7 +69,13 @@ export async function openSession(q: Q, phone: string): Promise<Session | null> 
 
 /* ============================== customer side ============================== */
 
-export function menuOf(all: Product[]): MenuItem[] {
+/* Uploaded pictures are stored as base64 text. Sending that along with every page load and every
+   refresh is what made the app crawl, so the screens get a small link instead — the browser
+   fetches the picture once and keeps it (the ?v= changes when the picture does). */
+const imgLink = (id: string, v: number, src: string) => (src.startsWith("data:") ? `/api/img/product/${id}?v=${v}` : src);
+const logoLink = (src: string) => (src.startsWith("data:") ? `/shop-logo?v=${src.length}` : src);
+
+export function menuOf(all: Product[], cfg: { enabled: boolean; earn: LoyaltyConfig["earn"] }): MenuItem[] {
   const order: string[] = [];
   for (const p of all) if (!order.includes(p.category)) order.push(p.category);
   return all
@@ -79,10 +87,11 @@ export function menuOf(all: Product[]): MenuItem[] {
       category: p.category,
       price: p.price,
       description: p.description,
-      image: p.image,
+      image: imgLink(p.id, p.updatedAt, p.image),
       tags: p.tags,
       soldOut: p.stock !== null && p.stock <= 0,
       left: p.stock !== null && p.stock <= p.lowAt ? p.stock : null,
+      points: pointsPerUnit(p, cfg),
     }));
 }
 
@@ -110,29 +119,31 @@ async function lastClose(q: Q, phone: string): Promise<TabClose | null> {
 async function view(q: Q, phone: string): Promise<TabView> {
   const s = await openSession(q, phone);
   const sid = s?.id;
-  const [all, st, list, closed, cps] = await Promise.all([
+  const [all, st, list, closed, cps, member, lcfg] = await Promise.all([
     q.select().from(products).orderBy(asc(products.createdAt), asc(products.id)),
     first(q.select().from(settings).where(eq(settings.id, 1))),
     sid ? q.select().from(orders).where(eq(orders.sessionId, sid)).orderBy(asc(orders.createdAt), asc(orders.no)) : Promise.resolve([] as Order[]),
     !s && phone ? lastClose(q, phone) : Promise.resolve(null),
     s?.couponCode ? q.select().from(coupons) : Promise.resolve([]),
+    s?.couponCode ? L.isMember(q, s.customerPhone) : Promise.resolve(false),
+    L.getConfig(q),
   ]);
   const name = st?.shopName ?? "Cafe";
   const orderingEnabled = st?.orderingEnabled ?? true;
   const live = list.filter((o) => o.status !== "cancelled");
   const total = round2(live.reduce((a, o) => a + o.subtotal, 0));
   const cp = s?.couponCode ? cps.find((c) => c.code === s.couponCode) ?? null : null;
-  const check = cp ? checkCoupon(cp, total, s?.customerPhone) : null;
-  const discount = cp && check?.ok ? computeBill({ items: live.flatMap((o) => o.items), coupon: cp, manualType: "amount", manualValue: 0, extra: 0, phone: s?.customerPhone }).couponDiscount : 0;
+  const check = cp ? checkCoupon(cp, total, s?.customerPhone, member) : null;
+  const discount = cp && check?.ok ? computeBill({ items: live.flatMap((o) => o.items), coupon: cp, manualType: "amount", manualValue: 0, extra: 0, phone: s?.customerPhone, member }).couponDiscount : 0;
   return {
     shopName: name,
     details: {
       ownerName: st?.ownerName ?? "", location: st?.location ?? "", address: st?.address ?? "", email: st?.email ?? "",
       address2: st?.address2 ?? "", whatsapp1: st?.whatsapp1 ?? "", whatsapp2: st?.whatsapp2 ?? "",
-      customerCare: st?.customerCare ?? "", mapsUrl: st?.mapsUrl ?? "", logoUrl: st?.logoUrl ?? "",
+      customerCare: st?.customerCare ?? "", mapsUrl: st?.mapsUrl ?? "", logoUrl: logoLink(st?.logoUrl ?? ""),
     },
     orderingEnabled,
-    menu: menuOf(all),
+    menu: menuOf(all, lcfg),
     closed,
     tab: !orderingEnabled ? null : s
       ? {
@@ -272,7 +283,7 @@ export function applyCoupon(raw: unknown, couponRaw: unknown) {
     if (!cp) throw new ApiError(`Coupon ${cc} doesn't exist.`);
     const live = (await tx.select().from(orders).where(eq(orders.sessionId, s.id))).filter((o) => o.status !== "cancelled");
     const sub = round2(live.reduce((a, o) => a + o.subtotal, 0));
-    const ok = checkCoupon(cp, sub, phone);
+    const ok = checkCoupon(cp, sub, phone, await L.isMember(tx, phone));
     if (!ok.ok) throw new ApiError(`Coupon ${cp.code}: ${ok.reason}.`);
     await tx.update(sessions).set({ couponCode: cp.code }).where(eq(sessions.id, s.id));
     return phone;
@@ -291,7 +302,7 @@ export function removeCoupon(raw: unknown) {
 /* ================================ admin side ================================ */
 
 export async function adminState(): Promise<AdminState> {
-  const [m, st, prods, sess, ords, bls, cps, us, exps, ecats, ings, btchs, rcps] = await Promise.all([
+  const [m, st, prods, sess, ords, bls, cps, us, exps, ecats, ings, btchs, rcps, sups, supInvs, apprs, lc, pcats] = await Promise.all([
     db.select().from(meta).where(eq(meta.id, 1)),
     db.select().from(settings).where(eq(settings.id, 1)),
     db.select().from(products).orderBy(asc(products.createdAt), asc(products.id)),
@@ -305,6 +316,11 @@ export async function adminState(): Promise<AdminState> {
     db.select().from(ingredients).orderBy(asc(ingredients.name)),
     db.select().from(batches).orderBy(desc(batches.createdAt), desc(batches.id)).limit(100),
     db.select().from(recipes).orderBy(asc(recipes.name)),
+    db.select().from(suppliers).orderBy(asc(suppliers.name)),
+    db.select().from(supplierInvoices).orderBy(desc(supplierInvoices.invoiceDate), desc(supplierInvoices.createdAt)),
+    db.select().from(approvalRequests).orderBy(desc(approvalRequests.createdAt)).limit(50),
+    L.getConfig(db),
+    db.select().from(productCategories).orderBy(asc(productCategories.createdAt)),
   ]);
   return {
     version: m[0]?.version ?? 0,
@@ -321,19 +337,24 @@ export async function adminState(): Promise<AdminState> {
       whatsapp2: st[0]?.whatsapp2 ?? "",
       customerCare: st[0]?.customerCare ?? "",
       mapsUrl: st[0]?.mapsUrl ?? "",
-      logoUrl: st[0]?.logoUrl ?? "",
+      logoUrl: logoLink(st[0]?.logoUrl ?? ""),
       walkInsOnly: st[0]?.walkInsOnly ?? false,
       kotEnabled: st[0]?.kotEnabled ?? true,
       orderingEnabled: st[0]?.orderingEnabled ?? true,
     },
-    products: prods,
+    products: prods.map((p) => ({ ...p, image: imgLink(p.id, p.updatedAt, p.image) })),
     sessions: sess,
     orders: ords,
     bills: bls,
     coupons: cps,
     users: us.map(publicUser),
+    loyaltyEarn: { enabled: lc.enabled, earn: lc.earn },
     expenses: exps,
     expenseCategories: ecats,
+    suppliers: sups,
+    categories: pcats,
+    approvals: apprs,
+    supplierInvoices: supInvs,
     ingredients: ings,
     batches: btchs,
     recipes: rcps,
@@ -541,7 +562,7 @@ const tally = (items: OrderItem[], sign: 1 | -1, into = new Map<string, number>(
 
 const restock = (tx: Tx, items: OrderItem[], m: Move) => moveStock(tx, tally(items, 1), m);
 
-async function saveProduct(tx: Tx, a: Args) {
+async function saveProduct(tx: Tx, a: Args, role = "admin") {
   const now = Date.now();
   const name = str(a.name, 80);
   const category = str(a.category, 40) || "Uncategorised";
@@ -557,9 +578,12 @@ async function saveProduct(tx: Tx, a: Args) {
     stock: stockRaw === null ? null : Math.floor(stockRaw),
     lowAt: int(a.lowAt, 0, 9999, 4),
     description: str(a.description, 240),
-    image: str(a.image, 6_500_000), // room for a ~4 MB base64 data URL (plus headroom)
+    // the screens show uploaded pictures as /api/img links; saving one of those back must not replace the real picture
+    ...(typeof a.image === "string" && a.image.startsWith("/api/img/product/") ? {} : { image: str(a.image, 6_500_000) }), // room for a ~4 MB base64 data URL (plus headroom)
     tags: Array.isArray(a.tags) ? (a.tags as unknown[]).map((x) => str(x, 20).toLowerCase()).filter(Boolean).slice(0, 6) : [],
     active: a.active !== false,
+    // how many loyalty points one of these earns is the admin's call; staff edits leave it as it is
+    ...(role === "admin" && a.loyaltyPoints !== undefined ? { loyaltyPoints: optNum(a.loyaltyPoints) === null ? null : Math.max(0, Math.floor(num(a.loyaltyPoints))) } : {}),
   };
   const id = str(a.id, 40);
   const dupe = (await tx.select().from(products)).find((p) => p.name.toLowerCase() === name.toLowerCase() && p.id !== id);
@@ -592,7 +616,8 @@ async function saveCoupon(tx: Tx, a: Args) {
   const id = str(a.id, 40);
   const clash = await first(tx.select().from(coupons).where(eq(coupons.code, c)));
   if (clash && clash.id !== id) throw new ApiError(`${c} already exists.`);
-  const fields = { code: c, percent, minOrder: round2(minOrder), expiresAt: exp || null, limit: limit === null ? null : Math.floor(limit), active: a.active !== false, ...(typeof a.restricted === "boolean" ? { restricted: a.restricted } : {}) };
+  const audience: "all" | "regular" | "loyalty" = a.audience === "loyalty" || a.audience === "regular" ? a.audience : "all";
+  const fields = { code: c, percent, minOrder: round2(minOrder), expiresAt: exp || null, limit: limit === null ? null : Math.floor(limit), active: a.active !== false, audience, ...(typeof a.restricted === "boolean" ? { restricted: a.restricted } : {}) };
   if (id) {
     await must(tx.select().from(coupons).where(eq(coupons.id, id)), "Coupon");
     const [x] = await tx.update(coupons).set(fields).where(eq(coupons.id, id)).returning();
@@ -625,7 +650,7 @@ export function couponForPage(raw: unknown) {
     const cp = await first(q.select().from(coupons).where(eq(coupons.code, cc)));
     if (!cp) return null;
     const shop = await first(q.select({ n: settings.shopName, logoUrl: settings.logoUrl }).from(settings).where(eq(settings.id, 1)));
-    return { coupon: { code: cp.code, percent: cp.percent, minOrder: cp.minOrder, expiresAt: cp.expiresAt, restricted: cp.restricted, active: cp.active, limit: cp.limit, used: cp.used }, shopName: shop?.n ?? "Cafe", logoUrl: shop?.logoUrl ?? "" };
+    return { coupon: { code: cp.code, percent: cp.percent, minOrder: cp.minOrder, expiresAt: cp.expiresAt, restricted: cp.restricted, audience: cp.audience, active: cp.active, limit: cp.limit, used: cp.used }, shopName: shop?.n ?? "Cafe", logoUrl: logoLink(shop?.logoUrl ?? "") };
   });
 }
 
@@ -666,7 +691,8 @@ async function createBill(tx: Tx, a: Args, actor = "admin"): Promise<Bill> {
   if (isGst && !(gstRaw >= 0 && gstRaw <= 100)) throw new ApiError("GST should be between 0 and 100%.");
   const phone = mobile(a.customerPhone);
   if (phone === null) throw new ApiError("Customer mobile should be a 10-digit number.");
-  const billInput = { items, coupon, manualType, manualValue, extra: num(a.extra) || 0, gst: isGst, gstPercent: isGst ? gstRaw : 0, phone: phone || s?.customerPhone } as const;
+  const billPhone = phone || s?.customerPhone;
+  const billInput = { items, coupon, manualType, manualValue, extra: num(a.extra) || 0, gst: isGst, gstPercent: isGst ? gstRaw : 0, phone: billPhone, member: coupon && coupon.audience !== "all" ? await L.isMember(tx, billPhone) : false } as const;
   const base = computeBill(billInput);
   if (coupon && base.couponOk && !base.couponOk.ok) throw new ApiError(`Coupon ${coupon.code}: ${base.couponOk.reason}.`);
   // loyalty points / reward asked for at the till — checked against the database, never the browser's numbers
@@ -793,9 +819,171 @@ async function ensureExpenseCategory(tx: Tx, name: string, now: number): Promise
 
 export function adminOp(op: string, a: Args, role = "admin") {
   return mutate(async (tx) => {
+    const result = await runOp(tx, op, a, role);
+    await logActivity(tx, op, a, role, result);
+    return result;
+  });
+}
+
+/** Writes who did what to the activity log, in the same transaction as the change itself. */
+async function logActivity(tx: Tx, op: string, a: Args, role: string, result: unknown) {
+  const r = (result && typeof result === "object" ? result : {}) as Record<string, unknown>;
+  const pending = r.pendingApproval === true;
+  const inner = (pending ? (r.request as Record<string, unknown> | undefined) : r) ?? {};
+  let target = "";
+  for (const k of ["targetName", "invoiceNo", "name", "code", "title", "customerName"]) {
+    const v = inner[k];
+    if (typeof v === "string" && v) {
+      target = v;
+      break;
+    }
+  }
+  if (!target) for (const k of ["name", "code", "title"]) if (typeof a[k] === "string" && a[k]) { target = String(a[k]); break; }
+  await tx.insert(activityLog).values({ id: uid(), actor: role === "admin" ? "admin" : "staff", action: op, target: target.slice(0, 120), outcome: pending ? "requested" : "done", createdAt: Date.now() });
+}
+
+export async function activityPage() {
+  return db.select().from(activityLog).orderBy(desc(activityLog.createdAt)).limit(2000);
+}
+
+/** Edits staff may ask for, but that only take effect with the admin's say-so: when staff run
+    one of these on an existing record it is parked as a request and runs (through runOp, as
+    the admin) once approved. `always` = the op only ever edits an existing record; `create` =
+    with no id it makes a new record, which staff may still do directly (otherwise that is
+    admin-only). */
+const APPROVAL_OPS: Record<string, { always?: boolean; create?: boolean }> = {
+  "ingredient.save": { create: true },
+  "product.save": { create: true },
+  "bill.edit": { always: true },
+  "loyalty.update": { always: true },
+  "loyalty.status": { always: true },
+  "loyalty.adjust": { always: true },
+  "loyalty.reward.save": {},
+  "loyalty.campaign.save": {},
+};
+
+/** Only plain, short values — what the admin compares in the popup. */
+const plain = (row: object): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(row).filter(([, v]) => v === null || typeof v === "number" || typeof v === "boolean" || (typeof v === "string" && v.length <= 200)));
+
+async function describeTarget(tx: Tx, op: string, id: string): Promise<{ name: string; before: Record<string, unknown> }> {
+  switch (op) {
+    case "ingredient.save": {
+      const r = await must(tx.select().from(ingredients).where(eq(ingredients.id, id)), "Ingredient");
+      return { name: r.name, before: plain(r) };
+    }
+    case "product.save": {
+      const r = await must(tx.select().from(products).where(eq(products.id, id)), "Product");
+      return { name: r.name, before: plain(r) };
+    }
+    case "bill.edit": {
+      const r = await must(tx.select().from(bills).where(eq(bills.id, id)), "Bill");
+      return { name: r.invoiceNo, before: plain(r) };
+    }
+    case "loyalty.reward.save": {
+      const r = await must(tx.select().from(loyaltyRewards).where(eq(loyaltyRewards.id, id)), "Reward");
+      return { name: r.name, before: plain(r) };
+    }
+    case "loyalty.campaign.save": {
+      const r = await must(tx.select().from(loyaltyCampaigns).where(eq(loyaltyCampaigns.id, id)), "Campaign");
+      return { name: r.name, before: plain(r) };
+    }
+    default: {
+      const r = await must(tx.select().from(loyaltyCustomers).where(eq(loyaltyCustomers.id, id)), "Member");
+      return { name: r.name, before: plain(r) };
+    }
+  }
+}
+
+/** What a "bill.edit" changes on a bill — the customer's details and how it was paid. Items and
+    amounts stay as they are (void the bill and bill again to change those). Throws if the edit isn't allowed. */
+function billEditPatch(b: Bill, a: Args) {
+  const patch: Partial<typeof bills.$inferInsert> = {};
+  if (a.customerName !== undefined) {
+    const n = str(a.customerName, 80);
+    if (n !== b.customerName) patch.customerName = n;
+  }
+  if (a.customerPhone !== undefined) {
+    const ph = mobile(a.customerPhone);
+    if (ph === null) throw new ApiError("Customer mobile should be a 10-digit number.");
+    if (ph !== b.customerPhone) {
+      if (b.loyaltyCustomerId || b.pointsEarned > 0 || b.pointsRedeemed > 0) throw new ApiError("This bill earned or used loyalty points for its customer, so the mobile can't be changed. Void it and bill again instead.");
+      patch.customerPhone = ph;
+    }
+  }
+  if (a.payment !== undefined) {
+    const pay: PayMethod = a.payment === "upi" || a.payment === "card" || a.payment === "split" ? a.payment : "cash";
+    const total = b.total;
+    let cash = pay === "cash" ? total : 0;
+    let upi = pay === "upi" ? total : 0;
+    let card = pay === "card" ? total : 0;
+    if (pay === "split") {
+      cash = round2(Math.max(0, num(a.cashAmount)));
+      upi = round2(Math.max(0, num(a.upiAmount)));
+      card = round2(Math.max(0, num(a.cardAmount)));
+      if (Math.abs(cash + upi + card - total) > 0.01) throw new ApiError(`The split amounts must add up to the bill total (${total}).`);
+      if ([cash, upi, card].filter((n) => n > 0).length < 2) throw new ApiError("A split bill needs two or more payment methods.");
+    }
+    if (pay !== b.payment || cash !== b.cashAmount || upi !== b.upiAmount || card !== b.cardAmount) {
+      if (b.status !== "completed") throw new ApiError("A voided bill's payment can't be changed.");
+      patch.payment = pay;
+      patch.cashAmount = cash;
+      patch.upiAmount = upi;
+      patch.cardAmount = card;
+      if (pay !== b.payment) {
+        patch.received = total;
+        patch.change = 0;
+      }
+    }
+  }
+  return patch;
+}
+
+async function requestApproval(tx: Tx, op: string, a: Args, role: string, now: number) {
+  const id = str(a.id, 40);
+  const { name, before } = await describeTarget(tx, op, id);
+  if (op === "ingredient.save" && !str(a.name, 80)) throw new ApiError("Give the ingredient a name.");
+  if (op === "bill.edit") billEditPatch(before as unknown as Bill, a); // refuse a bad edit now, not when the admin gets to it
+  const payload: Record<string, unknown> = Object.fromEntries(Object.entries(a).filter(([k]) => k !== "op"));
+  if (op === "product.save") delete payload.loyaltyPoints; // points per item is the admin's call alone
+  // asking again about the same thing replaces the earlier ask — except points adjustments, which each count
+  const pending = op === "loyalty.adjust" ? null : await first(tx.select().from(approvalRequests).where(and(eq(approvalRequests.targetId, id), eq(approvalRequests.kind, op), eq(approvalRequests.status, "pending"))));
+  if (pending) {
+    const [x] = await tx.update(approvalRequests).set({ payload, before, requestedBy: role, createdAt: now }).where(eq(approvalRequests.id, pending.id)).returning();
+    return { pendingApproval: true, request: x };
+  }
+  const [x] = await tx.insert(approvalRequests).values({ id: uid(), kind: op, targetId: id, targetName: name, payload, before, requestedBy: role, status: "pending", decidedBy: "", createdAt: now, decidedAt: null }).returning();
+  return { pendingApproval: true, request: x };
+}
+
+async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<unknown> {
+  {
     const now = Date.now();
     const id = str(a.id, 40);
+    const gate = role !== "admin" ? APPROVAL_OPS[op] : undefined;
+    if (gate) {
+      if (gate.always || id) return requestApproval(tx, op, a, role, now);
+      if (!gate.create) throw new ApiError("Only the admin can do that.", 403);
+    }
     switch (op) {
+      case "bill.edit": {
+        const b = await must(tx.select().from(bills).where(eq(bills.id, id)), "Bill");
+        const patch = billEditPatch(b, a);
+        if (!Object.keys(patch).length) return b;
+        const [x] = await tx.update(bills).set(patch).where(eq(bills.id, id)).returning();
+        return x;
+      }
+      case "approval.approve":
+      case "approval.reject": {
+        if (role !== "admin") throw new ApiError("Only the admin can do that.", 403);
+        const req = await must(tx.select().from(approvalRequests).where(eq(approvalRequests.id, id)), "Request");
+        if (req.status !== "pending") throw new ApiError("That request has already been decided.");
+        const approve = op === "approval.approve";
+        // the change itself runs as the admin, in this same transaction: if it can't be applied, nothing is recorded
+        if (approve) await runOp(tx, req.kind, { ...req.payload, id: req.targetId }, "admin");
+        const [x] = await tx.update(approvalRequests).set({ status: approve ? "approved" : "rejected", decidedBy: role, decidedAt: now }).where(eq(approvalRequests.id, id)).returning();
+        return x;
+      }
       /* ---------- settings ---------- */
       case "settings.update": {
         const patch: Record<string, unknown> = {};
@@ -827,7 +1015,7 @@ export function adminOp(op: string, a: Args, role = "admin") {
             patch[k] = v;
           }
         }
-        if (a.logoUrl !== undefined) {
+        if (a.logoUrl !== undefined && !(typeof a.logoUrl === "string" && a.logoUrl.startsWith("/shop-logo"))) {
           const v = typeof a.logoUrl === "string" ? a.logoUrl.trim() : "";
           const isUpload = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v);
           if (v && !isUpload && !/^https?:\/\/[^\s/]+/i.test(v)) throw new ApiError("Logo should be a PNG/JPG file or an http(s) link.");
@@ -918,7 +1106,7 @@ export function adminOp(op: string, a: Args, role = "admin") {
 
       /* ---------- inventory ---------- */
       case "product.save":
-        return saveProduct(tx, a);
+        return saveProduct(tx, a, role);
       case "product.delete": {
         const p = await must(tx.select().from(products).where(eq(products.id, id)), "Product");
         await tx.delete(products).where(eq(products.id, p.id));
@@ -960,7 +1148,24 @@ export function adminOp(op: string, a: Args, role = "admin") {
         const to = str(a.to, 40);
         if (!from || !to) throw new ApiError("Enter a category name.");
         await tx.update(products).set({ category: to, updatedAt: now }).where(eq(products.category, from));
+        await tx.update(productCategories).set({ name: to }).where(eq(productCategories.name, from));
         return { from, to };
+      }
+      case "category.add": {
+        const name = str(a.name, 40);
+        if (!name) throw new ApiError("Enter a category name.");
+        const taken = (await tx.select({ n: products.category }).from(products).groupBy(products.category)).some((r) => r.n.toLowerCase() === name.toLowerCase());
+        const clash = await first(tx.select().from(productCategories).where(sql`lower(${productCategories.name}) = lower(${name})`));
+        if (taken || clash) throw new ApiError(`"${clash?.name ?? name}" is already a category.`);
+        const [x] = await tx.insert(productCategories).values({ id: uid(), name, createdAt: now }).returning();
+        return x;
+      }
+      case "category.delete": {
+        const name = str(a.name, 40);
+        const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(products).where(eq(products.category, name));
+        if (n) throw new ApiError(`${name} still has ${n} product${n === 1 ? "" : "s"} — move or delete them first.`);
+        await tx.delete(productCategories).where(eq(productCategories.name, name));
+        return null;
       }
       case "product.toggle": {
         const p = await must(tx.select().from(products).where(eq(products.id, id)), "Product");
@@ -971,7 +1176,7 @@ export function adminOp(op: string, a: Args, role = "admin") {
       /* ---------- raw ingredients (sugar, milk, flour…) ---------- */
       case "ingredient.save": {
         const name = str(a.name, 80);
-        const unit: IngredientUnit = a.unit === "ml" ? "ml" : "g";
+        const unit: IngredientUnit = INGREDIENT_UNITS.find((u) => u.key === a.unit)?.key ?? "g";
         const lowAt = Math.max(0, num(a.lowAt) || 0);
         if (!name) throw new ApiError("Give the ingredient a name.");
         /* The unique index is case-insensitive and covers inactive rows too, so an
@@ -1184,6 +1389,66 @@ export function adminOp(op: string, a: Args, role = "admin") {
         const [x] = await tx.insert(expenses).values({ id: uid(), ...fields, createdAt: now }).returning();
         return x;
       }
+      /* ---------- suppliers & their invoices ---------- */
+      case "supplier.save": {
+        const name = str(a.name, 80);
+        if (!name) throw new ApiError("Enter the supplier's name.");
+        const phone = str(a.phone, 20).replace(/[^\d+\- ]/g, "");
+        const email = str(a.email, 120);
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError("That email address doesn't look right.");
+        const gstin = str(a.gstin, 15).toUpperCase().replace(/[^A-Z0-9]/g, "");
+        if (gstin && !/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/.test(gstin)) throw new ApiError("GSTIN should be 15 characters, like 33ABCDE1234F1Z5.");
+        const clash = await first(tx.select().from(suppliers).where(sql`lower(${suppliers.name}) = lower(${name})`));
+        if (clash && clash.id !== id) throw new ApiError(`${clash.name} is already on your supplier list.`);
+        const fields = { name, contactPerson: str(a.contactPerson, 80), phone, email, gstin, address: str(a.address, 300), supplies: str(a.supplies, 160), notes: str(a.notes, 300), active: a.active !== false };
+        if (id) {
+          await must(tx.select().from(suppliers).where(eq(suppliers.id, id)), "Supplier");
+          const [x] = await tx.update(suppliers).set(fields).where(eq(suppliers.id, id)).returning();
+          return x;
+        }
+        const [x] = await tx.insert(suppliers).values({ id: uid(), ...fields, createdAt: now }).returning();
+        return x;
+      }
+      case "supplier.delete": {
+        await must(tx.select().from(suppliers).where(eq(suppliers.id, id)), "Supplier");
+        const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(supplierInvoices).where(eq(supplierInvoices.supplierId, id));
+        if (n) throw new ApiError(`This supplier has ${n} invoice${n === 1 ? "" : "s"} on record — delete those first, or mark the supplier inactive instead.`);
+        await tx.delete(suppliers).where(eq(suppliers.id, id));
+        return null;
+      }
+      case "supplierinv.save": {
+        const sup = await must(tx.select().from(suppliers).where(eq(suppliers.id, str(a.supplierId, 40))), "Supplier");
+        const invoiceNo = str(a.invoiceNo, 40);
+        const date = str(a.invoiceDate, 10) || shopToday(now);
+        const due = str(a.dueDate, 10);
+        const price = round2(num(a.price));
+        const gstPercent = round2(num(a.gstPercent));
+        if (!invoiceNo) throw new ApiError("Enter the supplier's invoice number.");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ApiError("Pick a valid invoice date.");
+        if (due && !/^\d{4}-\d{2}-\d{2}$/.test(due)) throw new ApiError("Pick a valid due date.");
+        if (!(price > 0)) throw new ApiError("Enter the price (before GST).");
+        if (!(gstPercent >= 0 && gstPercent <= 100)) throw new ApiError("GST should be between 0 and 100%.");
+        const gstAmount = round2((price * gstPercent) / 100);
+        const total = round2(price + gstAmount);
+        const paidAmount = round2(Math.max(0, num(a.paidAmount)));
+        if (paidAmount > total + 0.005) throw new ApiError(`Paid amount can't be more than the invoice total (${total}).`);
+        const dupe = await first(tx.select().from(supplierInvoices).where(and(eq(supplierInvoices.supplierId, sup.id), sql`lower(${supplierInvoices.invoiceNo}) = lower(${invoiceNo})`)));
+        if (dupe && dupe.id !== id) throw new ApiError(`${sup.name} already has an invoice numbered ${invoiceNo}.`);
+        const mode = String(a.paymentMode);
+        const fields = { supplierId: sup.id, invoiceNo, invoiceDate: date, price, gstPercent, gstAmount, total, paidAmount, paymentMode: ["cash", "upi", "card", "bank", "cheque"].includes(mode) ? mode : "cash", dueDate: due, notes: str(a.notes, 300) };
+        if (id) {
+          await must(tx.select().from(supplierInvoices).where(eq(supplierInvoices.id, id)), "Invoice");
+          const [x] = await tx.update(supplierInvoices).set(fields).where(eq(supplierInvoices.id, id)).returning();
+          return x;
+        }
+        const [x] = await tx.insert(supplierInvoices).values({ id: uid(), ...fields, createdAt: now }).returning();
+        return x;
+      }
+      case "supplierinv.delete": {
+        await must(tx.select().from(supplierInvoices).where(eq(supplierInvoices.id, id)), "Invoice");
+        await tx.delete(supplierInvoices).where(eq(supplierInvoices.id, id));
+        return null;
+      }
       case "expcat.save": {
         const name = str(a.name, 40);
         if (!name) throw new ApiError("Give the category a name.");
@@ -1271,5 +1536,5 @@ export function adminOp(op: string, a: Args, role = "admin") {
         return L.deleteCampaign(tx, a, role);
     }
     throw new ApiError(`Unknown action: ${op}`);
-  });
+  }
 }

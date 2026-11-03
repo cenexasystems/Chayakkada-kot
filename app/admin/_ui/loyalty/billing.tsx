@@ -6,15 +6,19 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Bill, OrderItem, Product } from "@/lib/types";
-import { rupee } from "@/lib/money";
+import { rupee, shopToday } from "@/lib/money";
 import type { LoyaltyLookup } from "@/lib/loyalty/types";
 import { campaignApplies, earnFor, nextTier, pointsValue, redeemCap, rewardValue, segmentOf, tierByKey, voucherLive } from "@/lib/loyalty/engine";
 import { useAdmin } from "../Store";
+import { MemberUpdate } from "./notify";
 import { Badge, Btn, Icon, Modal, cx, inputLineCls, labelCls } from "../kit";
 
 const okPhone = (p: string) => /^[6-9]\d{9}$/.test(p);
 
-export const TIER_TONE = { bronze: "orange", silver: "slate", gold: "amber", platinum: "violet" } as const;
+const KNOWN_TONE: Record<string, "orange" | "slate" | "amber" | "violet"> = { bronze: "orange", silver: "slate", gold: "amber", platinum: "violet" };
+const EXTRA_TONE = ["sky", "green", "red", "violet", "orange"] as const;
+/** Badge colour for a tier: the starter four keep theirs, added tiers get one from the palette. */
+export const tierTone = (key: string) => KNOWN_TONE[key] ?? EXTRA_TONE[[...key].reduce((a, ch) => a + ch.charCodeAt(0), 0) % EXTRA_TONE.length];
 
 export async function fetchLookup(phone: string): Promise<LoyaltyLookup | null> {
   try {
@@ -102,12 +106,14 @@ export function earnPreview(lk: LoyaltyLookup | null, items: OrderItem[], produc
   if (!lk || !c || !lk.enabled || c.status !== "active") return 0;
   const cat = new Map(products.map((p) => [p.id, p.category]));
   const catOf = (pid: string | null) => (pid ? cat.get(pid) ?? "" : "");
+  const own = new Map(products.map((p) => [p.id, p.loyaltyPoints]));
+  const pointsOf = (pid: string | null) => (pid ? own.get(pid) ?? null : null);
   const now = Date.now();
   const seg = segmentOf(lk.stats, lk.config, c.tier, now);
   const ratio = subtotal > 0 ? Math.max(0, subtotal - discount) / subtotal : 0;
   const net = items.reduce((a, i) => a + i.price * i.qty, 0) * ratio;
   const camps = lk.campaigns.filter((k) => campaignApplies(k, { now, tier: c.tier, segment: seg, eligibleNet: net, items, catOf }));
-  return earnFor({ cfg: lk.config, items, catOf, subtotal, discount, tier: c.tier, firstPurchase: lk.firstPurchase, campaigns: camps }).total;
+  return earnFor({ cfg: lk.config, items, catOf, pointsOf, subtotal, discount, tier: c.tier, firstPurchase: lk.firstPurchase, campaigns: camps }).total;
 }
 
 /* ---------------- member strip (under Customer details) ---------------- */
@@ -140,7 +146,7 @@ export function MemberStrip({ phone, name, lk, loading, onEnrolled }: { phone: s
         <Icon name="star" size={14} className="text-amber-600" />
         <b className="text-slate-900">{c.name}</b>
         <span className="font-mono text-[11px] text-slate-500">{c.code}</span>
-        <Badge tone={TIER_TONE[c.tier]}>{tier.name}</Badge>
+        <Badge tone={tierTone(c.tier)}>{tier.name}</Badge>
         {c.status !== "active" && <Badge tone="red">Deactivated</Badge>}
       </span>
       <span className="text-slate-700">
@@ -157,20 +163,27 @@ export function MemberStrip({ phone, name, lk, loading, onEnrolled }: { phone: s
   );
 }
 
+/* Shown right after enrolment: the welcome message, ready to send on WhatsApp. */
+export function EnrolledStep({ member, onClose }: { member: { name: string; phone: string; code: string; walletToken: string }; onClose: () => void }) {
+  return <MemberUpdate phone={member.phone} name={member.name} kind="enrol" vars={{ code: member.code }} onClose={onClose} />;
+}
+
 function EnrolModal({ phone, name: start, onClose, onDone }: { phone: string; name: string; onClose: () => void; onDone: () => void }) {
   const { act, toast } = useAdmin();
   const [f, setF] = useState({ name: start, email: "", birthday: "", referralCode: "", consent: true });
   const [busy, setBusy] = useState(false);
+  const [member, setMember] = useState<{ name: string; phone: string; code: string; walletToken: string } | null>(null);
   const save = async () => {
     setBusy(true);
-    const r = await act<{ code: string }>("loyalty.register", { phone, ...f });
+    const r = await act<{ name: string; phone: string; code: string; walletToken: string }>("loyalty.register", { phone, ...f });
     setBusy(false);
     if (r.ok) {
       toast({ kind: "ok", title: `Enrolled — member ${r.result.code}` });
-      onDone();
-      onClose();
+      setMember(r.result);
     }
   };
+  // the member strip swaps this modal out once the lookup refreshes, so refresh only on close
+  if (member) return <EnrolledStep member={member} onClose={() => { onDone(); onClose(); }} />;
   return (
     <Modal
       open
@@ -266,8 +279,9 @@ export function RedeemBox({ lk, sel, setSel, pts, setPts, info, earn }: { lk: Lo
 }
 
 /** Points on a saved bill, for the "Bill saved" dialog. */
-export function SavedLoyalty({ bill }: { bill: Bill }) {
+export function SavedLoyalty({ bill, tierBefore }: { bill: Bill; tierBefore?: string }) {
   const [lk, setLk] = useState<LoyaltyLookup | null>(null);
+  const [tell, setTell] = useState(false);
   useEffect(() => {
     if (!bill.loyaltyCustomerId || !bill.customerPhone) return;
     let live = true;
@@ -277,12 +291,30 @@ export function SavedLoyalty({ bill }: { bill: Bill }) {
     };
   }, [bill.loyaltyCustomerId, bill.customerPhone]);
   if (!bill.loyaltyCustomerId) return null;
+  const moved = bill.pointsEarned > 0 || bill.pointsRedeemed > 0;
   return (
+    <div className="space-y-2">
     <p className="rounded-xl bg-amber-50 px-3 py-2 text-[12.5px] font-semibold text-amber-800">
       {bill.pointsEarned > 0 ? `Earned ${bill.pointsEarned} pts` : "No points on this bill"}
       {bill.pointsRedeemed > 0 && ` · used ${bill.pointsRedeemed} pts`}
       {bill.rewardName && ` · ${bill.rewardName}`}
       {lk?.customer && ` · balance ${lk.customer.available} pts (${tierByKey(lk.customer.tier, lk.config).name})`}
     </p>
+    {moved && bill.customerPhone && (
+      <button type="button" onClick={() => setTell(true)} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#22c55e] bg-white text-[13px] font-bold text-[#16a34a] hover:bg-emerald-50">
+        Send points update on WhatsApp
+      </button>
+    )}
+    {tell && (
+      <MemberUpdate
+        phone={bill.customerPhone}
+        name={bill.customerName}
+        kind={bill.pointsEarned > 0 ? "earned" : "redeemed"}
+        vars={{ points: bill.pointsEarned > 0 ? bill.pointsEarned : bill.pointsRedeemed }}
+        tierBefore={tierBefore}
+        onClose={() => setTell(false)}
+      />
+    )}
+    </div>
   );
 }

@@ -13,38 +13,38 @@
 
 .adm {
   /* neutrals: creamy white and charcoal, in place of Tailwind's cool grey */
-  --color-white: #fffdf9;
-  --color-slate-50: #faf5ec;
-  --color-slate-100: #f1e8d8;
-  --color-slate-200: #e2d5bd;
-  --color-slate-300: #c9b89b;
-  --color-slate-400: #a39482;
-  --color-slate-500: #82766a;
-  --color-slate-600: #655a50;
-  --color-slate-700: #4a413a;
-  --color-slate-800: #332d29;
-  --color-slate-900: #231f1c;
-  --color-slate-950: #171412;
+  --color-white: #fbfcf3;
+  --color-slate-50: #f6f7ea;
+  --color-slate-100: #eceed9;
+  --color-slate-200: #dde1c3;
+  --color-slate-300: #c3c9a3;
+  --color-slate-400: #9ca37e;
+  --color-slate-500: #777f5e;
+  --color-slate-600: #5d6548;
+  --color-slate-700: #464d36;
+  --color-slate-800: #33392a;
+  --color-slate-900: #21251a;
+  --color-slate-950: #14170f;
 
   /* the accent is tomato red */
-  --color-red-50: #fff0ec;
-  --color-red-100: #ffdcd3;
-  --color-red-200: #ffbfae;
-  --color-red-300: #ff9880;
-  --color-red-400: #f46a4d;
-  --color-red-500: #e9442a;
-  --color-red-600: #dc3414;
-  --color-red-700: #b82810;
-  --color-red-800: #931f0e;
-  --color-red-900: #741a0e;
+  --color-red-50: #f3f5e6;
+  --color-red-100: #e4e9cc;
+  --color-red-200: #ccd5a7;
+  --color-red-300: #aeba7f;
+  --color-red-400: #8f9c5e;
+  --color-red-500: #7a8851;
+  --color-red-600: #6b7550;
+  --color-red-700: #576141;
+  --color-red-800: #454d34;
+  --color-red-900: #363c29;
 
   /* golden yellow for anything that wants attention without alarm */
   --color-amber-50: #fff9e0;
   --color-amber-100: #fff0b3;
   --color-amber-200: #ffe27a;
-  --color-amber-300: #ffd13d;
-  --color-amber-400: #ffbf14;
-  --color-amber-500: #f2a900;
+  --color-amber-300: #e6c764;
+  --color-amber-400: #d9b445;
+  --color-amber-500: #c79f2c;
   --color-amber-600: #cc8600;
   --color-amber-700: #9c6500;
   --color-amber-900: #593a00;
@@ -150,25 +150,25 @@ html:has(.adm) {
   text-transform: uppercase;
 }
 .adm-side__brand small {
-  color: rgba(255, 246, 227, 0.42);
+  color: rgba(243, 244, 225, 0.42);
 }
 .adm-side hr {
   border: 0;
   border-top: 1px solid var(--line-dark);
 }
 .adm-link {
-  color: rgba(255, 246, 227, 0.72);
+  color: rgba(243, 244, 225, 0.72);
   transition: background-color 0.25s, color 0.25s, transform 0.25s;
 }
 .adm-link:hover {
   transform: translateX(2px);
-  background: rgba(255, 246, 227, 0.08);
+  background: rgba(243, 244, 225, 0.08);
   color: var(--cream);
 }
 .adm-link.is-on {
   background: linear-gradient(135deg, var(--cherry), #f05a20);
   color: #fff;
-  box-shadow: 0 8px 16px -10px rgba(224, 58, 30, 0.9);
+  box-shadow: 0 8px 16px -10px rgba(107, 117, 80, 0.9);
 }
 .adm-link.is-on:hover {
   background: var(--cherry);
@@ -233,6 +233,10 @@ html:has(.adm) {
     opacity: 0;
   }
 }
+/* search boxes already have their own pill that lights up on focus — no yellow box inside it */
+.adm .adm-search input:focus-visible {
+  box-shadow: none;
+}
 .adm-scrim {
   animation: adm-fade 0.25s both;
 }
@@ -262,11 +266,11 @@ html:has(.adm) {
 }
 .adm .bg-white.rounded-xl,
 .adm .bg-white.rounded-2xl {
-  box-shadow: 0 1px 0 rgba(33, 28, 24, 0.04), 0 10px 24px -18px rgba(33, 28, 24, 0.35);
+  box-shadow: 0 1px 0 rgba(31, 34, 24, 0.04), 0 10px 24px -18px rgba(31, 34, 24, 0.35);
 }
 .adm button.bg-red-600,
 .adm a.bg-red-600 {
-  box-shadow: 0 8px 16px -10px rgba(220, 52, 20, 0.9);
+  box-shadow: 0 8px 16px -10px rgba(107, 117, 80, 0.9);
 }
 .adm button.bg-red-600:not(:disabled):hover {
   transform: translateY(-1px);
@@ -274,7 +278,7 @@ html:has(.adm) {
 .adm input:focus-visible,
 .adm textarea:focus-visible,
 .adm select:focus-visible {
-  box-shadow: 0 0 0 3px rgba(255, 184, 28, 0.35);
+  box-shadow: 0 0 0 3px rgba(214, 176, 74, 0.35);
 }
 .adm-scrim {
   backdrop-filter: blur(3px);

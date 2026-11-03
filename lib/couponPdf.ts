@@ -59,7 +59,7 @@ export function drawCoupon(d: CouponCardData): HTMLCanvasElement {
   g.save();
   roundRect(g, x, y, w, h, 36);
   g.clip();
-  g.fillStyle = "#dc2626";
+  g.fillStyle = "#6b7550";
   g.fillRect(x + w - stub, y, stub, h);
   g.restore();
   // perforation notches

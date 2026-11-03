@@ -619,6 +619,7 @@ export default function Menu({ initial }: { initial: TabView }) {
                       {m.description && <p>{m.description}</p>}
                       <div className="tm-item__foot">
                         <b className="tm-price">{rupee(m.price)}</b>
+                        {m.points > 0 && <span className="tm-pts" title="Loyalty points you earn">+{m.points} pts</span>}
                         {m.left !== null && !m.soldOut && <span className="tm-left">Only {m.left} left</span>}
                         {ordering && (
                           <span className="tm-item__act">

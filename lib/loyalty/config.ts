@@ -2,8 +2,27 @@
    server (which enforces it) and the admin screens (which preview with it).
    Every value here is a default the owner can change on the Loyalty → Settings tab. */
 
-export type TierKey = "bronze" | "silver" | "gold" | "platinum";
+/** A tier's short id (lower-case letters, digits, - or _). The owner can add, rename and remove tiers. */
+export type TierKey = string;
+/** The starter set that comes with a new programme. */
 export const TIER_KEYS: TierKey[] = ["bronze", "silver", "gold", "platinum"];
+export const MAX_TIERS = 8;
+
+/** The WhatsApp messages sent to members when something changes on their account. */
+export type MessageKey = "enrol" | "earned" | "redeemed" | "tier" | "adjust" | "reward" | "status";
+export type LoyaltyMessages = { enabled: boolean; templates: Record<MessageKey, string> };
+
+export const MESSAGE_META: { key: MessageKey; label: string; when: string }[] = [
+  { key: "enrol", label: "Welcome", when: "When a customer is enrolled" },
+  { key: "earned", label: "Points earned", when: "After a bill that earned points" },
+  { key: "redeemed", label: "Points used", when: "After a bill paid with points" },
+  { key: "tier", label: "Tier upgrade", when: "When a bill moves a member up a tier" },
+  { key: "adjust", label: "Points adjusted", when: "When staff add or remove points" },
+  { key: "reward", label: "Reward ready", when: "When a reward is issued" },
+  { key: "status", label: "Membership status", when: "When a membership is deactivated or reactivated" },
+];
+/** Words that are filled in for each member. */
+export const MESSAGE_FIELDS = ["name", "shop", "date", "points", "balance", "tier", "benefits", "code", "wallet", "reason", "reward", "ref", "expires", "status"] as const;
 
 export type Tier = { key: TierKey; name: string; min: number; multiplier: number; benefits: string };
 
@@ -56,6 +75,7 @@ export type LoyaltyConfig = {
   birthday: Occasion;
   anniversary: Occasion;
   referral: { enabled: boolean; referrerBonus: number; refereeBonus: number; minPurchase: number; startsOn: string; endsOn: string; maxPerReferrer: number; tiers: TierKey[] };
+  messages: LoyaltyMessages;
   crm: { newDays: number; regularVisits: number; frequentVisits: number; frequentDays: number; highValue: number; vipSpend: number; atRiskDays: number; inactiveDays: number; lostDays: number };
 };
 
@@ -86,6 +106,18 @@ export const DEFAULT_CONFIG: LoyaltyConfig = {
   birthday: { enabled: true, bonusPoints: 50, reward: { kind: "percent", name: "Birthday treat — 15% off", value: 15, productId: null }, windowDays: 7, validityDays: 14, tiers: [] },
   anniversary: { enabled: false, bonusPoints: 50, reward: none, windowDays: 7, validityDays: 14, tiers: [] },
   referral: { enabled: true, referrerBonus: 50, refereeBonus: 25, minPurchase: 200, startsOn: "", endsOn: "", maxPerReferrer: 20, tiers: [] },
+  messages: {
+    enabled: true,
+    templates: {
+      enrol: "Hi {name}! 🎉 You are now a loyalty member of {shop} (ID {code}) since {date}. You start at {tier}. Earn points on every bill and see them here: {wallet}",
+      earned: "Hi {name}! You earned {points} loyalty points at {shop} on {date}. Your balance is {balance} pts ({tier}). {wallet}",
+      redeemed: "Hi {name}! You used {points} loyalty points at {shop} on {date}. Your balance is {balance} pts. {wallet}",
+      tier: "Congratulations {name}! 🥳 You have reached {tier} at {shop} — and earned {points} points today. Balance: {balance} pts. Your benefits: {benefits}",
+      adjust: "Hi {name}, your {shop} loyalty points were updated by {points} pts ({reason}). New balance: {balance} pts. {wallet}",
+      reward: "Hi {name}! 🎁 A reward is waiting for you at {shop}: {reward} (code {ref}), valid till {expires}. Just show it at billing.",
+      status: "Hi {name}, your {shop} loyalty membership is now {status}. Your {balance} points are kept safe.",
+    },
+  },
   crm: { newDays: 30, regularVisits: 3, frequentVisits: 6, frequentDays: 90, highValue: 5000, vipSpend: 15000, atRiskDays: 30, inactiveDays: 60, lostDays: 90 },
 };
 
@@ -98,7 +130,8 @@ const i = (v: unknown, lo: number, hi: number, d: number) => Math.round(n(v, lo,
 const b = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
 const s = (v: unknown, max: number, d = "") => (typeof v === "string" ? v.trim().slice(0, max) : d);
 const strs = (v: unknown, max = 200) => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim().slice(0, 80)))].slice(0, max) : []);
-const tiersOf = (v: unknown): TierKey[] => strs(v).filter((x): x is TierKey => (TIER_KEYS as string[]).includes(x));
+const slug = (v: unknown) => s(v, 20).toLowerCase().replace(/[^a-z0-9_-]/g, "");
+const tiersOf = (v: unknown): TierKey[] => strs(v).filter((x) => /^[a-z0-9_-]{1,20}$/.test(x));
 const day = (v: unknown) => {
   const x = s(v, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(x) ? x : "";
@@ -126,12 +159,27 @@ export function sanitizeConfig(raw: unknown): LoyaltyConfig {
   const rf = obj(r.referral);
   const c = obj(r.crm);
   const rawTiers = Array.isArray(r.tiers) ? (r.tiers as unknown[]).map(obj) : [];
-  const tiers = D.tiers.map((t) => {
-    const x = rawTiers.find((y) => y.key === t.key) ?? {};
-    return { key: t.key, name: s(x.name, 30, t.name) || t.name, min: i(x.min, 0, 10_000_000, t.min), multiplier: n(x.multiplier, 0, 20, t.multiplier), benefits: s(x.benefits, 300, t.benefits) };
-  });
+  /* The owner can add, rename and remove tiers: whatever list comes in is cleaned up — unique ids,
+     lowest first, the first starting at 0 points — and the starter set stands in if it is empty. */
+  const seen = new Set<string>();
+  let tiers: Tier[] = rawTiers
+    .slice(0, MAX_TIERS)
+    .map((x, k) => {
+      const name = s(x.name, 30);
+      let key = slug(x.key) || slug(name) || `tier${k + 1}`;
+      while (seen.has(key)) key = `${key.slice(0, 17)}-${k + 1}`;
+      seen.add(key);
+      return { key, name, min: i(x.min, 0, 10_000_000, 0), multiplier: n(x.multiplier, 0, 20, 1), benefits: s(x.benefits, 300) };
+    })
+    .filter((t) => t.name);
+  if (!tiers.length) tiers = D.tiers.map((t) => ({ ...t }));
+  tiers.sort((a, b) => a.min - b.min);
   tiers[0].min = 0;
   for (let k = 1; k < tiers.length; k++) if (tiers[k].min <= tiers[k - 1].min) tiers[k].min = tiers[k - 1].min + 1;
+  const mg = obj(r.messages);
+  const mt = obj(mg.templates);
+  const messages: LoyaltyMessages = { enabled: b(mg.enabled, D.messages.enabled), templates: { ...D.messages.templates } };
+  for (const k of Object.keys(D.messages.templates) as MessageKey[]) messages.templates[k] = s(mt[k], 600) || D.messages.templates[k];
 
   const milestones = (Array.isArray(st.milestones) ? (st.milestones as unknown[]) : D.stamps.milestones)
     .map(obj)
@@ -173,6 +221,7 @@ export function sanitizeConfig(raw: unknown): LoyaltyConfig {
       excludedCategories: rd.excludedCategories === undefined ? D.redeem.excludedCategories : strs(rd.excludedCategories),
     },
     tiers,
+    messages,
     expiry: { days: i(ex.days, 0, 3650, D.expiry.days), warnDays: i(ex.warnDays, 1, 365, D.expiry.warnDays) },
     stamps: { enabled: b(st.enabled, D.stamps.enabled), minBill: n(st.minBill, 0, 1_000_000, D.stamps.minBill), rule: st.rule === "per_bill" ? "per_bill" : st.rule === "per_day" ? "per_day" : D.stamps.rule, tiers: st.tiers === undefined ? D.stamps.tiers : tiersOf(st.tiers), milestones },
     birthday: occasion(r.birthday, D.birthday),

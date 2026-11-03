@@ -1,15 +1,22 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { Coupon } from "@/lib/types";
+import type { Coupon, CouponAudience } from "@/lib/types";
 import { couponStatus, rupee } from "@/lib/money";
 import { couponPdf, sharePdf } from "@/lib/couponPdf";
 import { useAdmin } from "./Store";
 import { waLink } from "./receipt";
-import { Badge, Btn, Empty, Icon, Kpi, Modal, Page, PageHead, SearchBox, Switch, WaIcon, cx, labelCls } from "./kit";
+import { OfferSend } from "./loyalty/OfferSend";
+import { Badge, Btn, Empty, Icon, Kpi, Modal, Page, PageHead, SearchBox, Switch, WaIcon, cx, downloadExcel, labelCls } from "./kit";
 
-type Form = { id?: string; code: string; percent: string; minOrder: string; expiresAt: string; limit: string; active: boolean; restricted: boolean };
-const EMPTY: Form = { code: "", percent: "", minOrder: "", expiresAt: "", limit: "", active: true, restricted: false };
+type Form = { id?: string; code: string; percent: string; minOrder: string; expiresAt: string; limit: string; active: boolean; restricted: boolean; audience: CouponAudience };
+const EMPTY: Form = { code: "", percent: "", minOrder: "", expiresAt: "", limit: "", active: true, restricted: false, audience: "all" };
+
+const AUDIENCES: { key: CouponAudience; label: string; hint: string; tone: "slate" | "amber" | "green" }[] = [
+  { key: "all", label: "Everyone", hint: "Any customer, member or not", tone: "slate" },
+  { key: "regular", label: "Non-loyalty", hint: "Customers who are not loyalty members", tone: "amber" },
+  { key: "loyalty", label: "Loyalty members", hint: "Active loyalty members only", tone: "green" },
+];
 
 const field = "h-12 w-full rounded-xl bg-slate-50 px-4 text-[14px] font-medium text-slate-900 outline-none ring-slate-100 transition placeholder:text-slate-400 focus:bg-white focus:ring-4";
 const STATUS = {
@@ -39,8 +46,10 @@ export default function CouponsPage() {
   const { s, act, confirm, toast, refresh } = useAdmin();
   const [f, setF] = useState<Form>(EMPTY);
   const [q, setQ] = useState("");
+  const [tab, setTab] = useState<CouponAudience | "every">("every");
   const [busy, setBusy] = useState(false);
   const [sendId, setSendId] = useState<string | null>(null);
+  const [blastId, setBlastId] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   const save = async (e: React.FormEvent) => {
@@ -55,7 +64,7 @@ export default function CouponsPage() {
   };
 
   const edit = (c: Coupon) => {
-    setF({ id: c.id, code: c.code, percent: String(c.percent), minOrder: c.minOrder ? String(c.minOrder) : "", expiresAt: c.expiresAt ?? "", limit: c.limit === null ? "" : String(c.limit), active: c.active, restricted: c.restricted });
+    setF({ id: c.id, code: c.code, percent: String(c.percent), minOrder: c.minOrder ? String(c.minOrder) : "", expiresAt: c.expiresAt ?? "", limit: c.limit === null ? "" : String(c.limit), active: c.active, restricted: c.restricted, audience: c.audience });
     // on a phone the form is above the list, so bring it into view
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -67,9 +76,10 @@ export default function CouponsPage() {
     }
   };
 
-  const list = s.coupons.filter((c) => !q || c.code.toLowerCase().includes(q.toLowerCase()));
+  const list = s.coupons.filter((c) => (tab === "every" || c.audience === tab) && (!q || c.code.toLowerCase().includes(q.toLowerCase())));
   const activeCount = s.coupons.filter((c) => couponStatus(c) === "active").length;
   const redemptions = s.coupons.reduce((n, c) => n + c.used, 0);
+  const blasting = blastId ? s.coupons.find((c) => c.id === blastId) ?? null : null;
   const sending = sendId ? s.coupons.find((c) => c.id === sendId) ?? null : null;
 
   return (
@@ -78,9 +88,29 @@ export default function CouponsPage() {
         title="Coupon Management"
         sub="Create discount codes and send them to customers on WhatsApp. Applies to the product subtotal only."
         right={
-          <Btn icon="refresh" onClick={() => refresh()} className="h-10">
-            Refresh
-          </Btn>
+          <span className="flex flex-wrap gap-2">
+            <Btn
+              icon="download"
+              className="h-10"
+              disabled={!s.coupons.length}
+              onClick={() =>
+                downloadExcel(`coupons-${new Date().toISOString().slice(0, 10)}.xlsx`, [
+                  {
+                    name: "Coupons",
+                    rows: [
+                      ["Code", "Who can use it", "Discount %", "Min order", "Expires", "Usage limit", "Used", "Sent", "Only for customers sent to", "Status"],
+                      ...s.coupons.map((c) => [c.code, c.audience === "loyalty" ? "Loyalty members" : c.audience === "regular" ? "Non-loyalty customers" : "Everyone", c.percent, c.minOrder, c.expiresAt ?? "", c.limit ?? "Unlimited", c.used, c.sent, c.restricted ? "Yes" : "No", couponStatus(c)]),
+                    ],
+                  },
+                ])
+              }
+            >
+              Download Excel
+            </Btn>
+            <Btn icon="refresh" onClick={() => refresh()} className="h-10">
+              Refresh
+            </Btn>
+          </span>
         }
       />
 
@@ -151,6 +181,24 @@ export default function CouponsPage() {
                 <input className={field} type="number" min={1} placeholder="e.g. 50" value={f.limit} onChange={(e) => setF({ ...f, limit: e.target.value })} />
               </label>
             </div>
+            <div>
+              <span className={labelCls}>Who can use it *</span>
+              <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Coupon audience">
+                {AUDIENCES.map((a) => (
+                  <button
+                    key={a.key}
+                    type="button"
+                    role="radio"
+                    aria-checked={f.audience === a.key}
+                    onClick={() => setF({ ...f, audience: a.key })}
+                    className={cx("rounded-xl border px-3 py-2.5 text-left transition", f.audience === a.key ? "border-red-600 bg-red-50 ring-2 ring-red-100" : "border-slate-200 bg-white hover:bg-slate-50")}
+                  >
+                    <span className="block text-[13px] font-bold text-slate-900">{a.label}</span>
+                    <span className="block text-[11px] leading-snug text-slate-500">{a.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex items-center justify-between gap-4 rounded-xl bg-slate-50 px-4 py-3">
               <span>
                 <span className="block text-[13px] font-bold text-slate-800">Only for customers it&apos;s sent to</span>
@@ -161,7 +209,7 @@ export default function CouponsPage() {
             <button
               type="submit"
               disabled={busy}
-              className="h-12 w-full rounded-xl bg-red-600 text-[14px] font-extrabold uppercase tracking-wide text-white shadow-[0_8px_20px_-10px_rgba(215,38,61,.9)] transition hover:bg-red-700 active:scale-[.99] disabled:opacity-50"
+              className="h-12 w-full rounded-xl bg-red-600 text-[14px] font-extrabold uppercase tracking-wide text-white shadow-[0_8px_20px_-10px_rgba(107, 117, 80,.9)] transition hover:bg-red-700 active:scale-[.99] disabled:opacity-50"
             >
               {busy ? "Saving…" : f.id ? "Save changes" : "Create coupon"}
             </button>
@@ -173,6 +221,16 @@ export default function CouponsPage() {
           <h2 className="mb-4 flex items-center gap-2 text-[18px] font-bold text-slate-900">
             All Coupons <span className="grid h-6 min-w-6 place-items-center rounded-full bg-slate-900 px-1.5 text-[12px] text-white">{s.coupons.length}</span>
           </h2>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {([{ key: "every", label: "All" }, ...AUDIENCES] as { key: CouponAudience | "every"; label: string }[]).map((x) => {
+              const n = x.key === "every" ? s.coupons.length : s.coupons.filter((c) => c.audience === x.key).length;
+              return (
+                <button key={x.key} type="button" onClick={() => setTab(x.key)} className={cx("h-8 rounded-full px-3.5 text-[12px] font-bold transition", tab === x.key ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50")}>
+                  {x.label} <span className="opacity-60">{n}</span>
+                </button>
+              );
+            })}
+          </div>
           <SearchBox value={q} onChange={setQ} placeholder="Search coupons by code…" className="mb-5 h-11 w-full rounded-xl" />
           {!list.length ? (
             <Empty icon="coupon" title={s.coupons.length ? "No coupons match" : "No coupons yet"}>
@@ -187,6 +245,7 @@ export default function CouponsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <b className="min-w-0 truncate font-mono text-[16px] tracking-wider text-slate-900">{c.code}</b>
                       <Badge tone={STATUS[st][1]}>{STATUS[st][0]}</Badge>
+                      {c.audience !== "all" && <Badge tone={AUDIENCES.find((a) => a.key === c.audience)!.tone}>{c.audience === "loyalty" ? "Loyalty members" : "Non-loyalty"}</Badge>}
                       {c.restricted && <Badge tone="amber">{c.phones.length ? `Only ${c.phones.length} phone${c.phones.length === 1 ? "" : "s"}` : "Sent-to only"}</Badge>}
                     </div>
                     <p className="mt-1.5 text-[15px] font-extrabold text-red-600">
@@ -198,6 +257,11 @@ export default function CouponsPage() {
                       {c.sent > 0 && ` • sent ${c.sent}×`}
                     </p>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {(
+                        <button type="button" title={c.audience === "loyalty" ? "Send to every loyalty member" : c.audience === "regular" ? "Send to every customer who isn't a loyalty member" : "Send to loyalty members and other customers"} onClick={() => setBlastId(c.id)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#22c55e] bg-white px-3.5 text-[12px] font-extrabold uppercase tracking-wide text-[#16a34a] hover:bg-emerald-50">
+                          <WaIcon size={15} /> {c.audience === "loyalty" ? "All members" : c.audience === "regular" ? "All customers" : "Everyone"}
+                        </button>
+                      )}
                       <button type="button" onClick={() => setSendId(c.id)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#22c55e] px-3.5 text-[12px] font-extrabold uppercase tracking-wide text-white hover:bg-[#16a34a]">
                         <WaIcon size={15} /> Send
                       </button>
@@ -224,6 +288,23 @@ export default function CouponsPage() {
         </section>
       </div>
 
+      {blasting && (
+        <OfferSend
+          key={blasting.id}
+          title={`${blasting.audience === "loyalty" ? "Send to loyalty members" : blasting.audience === "regular" ? "Send to customers" : "Send to everyone"} · ${blasting.code}`}
+          who={blasting.audience === "loyalty" ? "this members-only coupon" : blasting.audience === "regular" ? "this coupon for non-members" : "this coupon"}
+          scope={blasting.audience === "loyalty" ? "members" : blasting.audience === "regular" ? "nonMembers" : "everyone"}
+          template={[
+            "Hi {name}! 🎉",
+            `${blasting.audience === "loyalty" ? "Exclusive for our loyalty members at {shop}" : "A special offer from {shop}"}: *${blasting.percent}% OFF*${blasting.minOrder ? ` on orders of ${rupee(blasting.minOrder)}+` : ""}${blasting.expiresAt ? `, valid till ${ddmmyyyy(blasting.expiresAt)}` : ""}.`,
+            "",
+            `Code: *${blasting.code}*`,
+            "Show it at billing, or enter it when you order from your phone.",
+          ].join("\n")}
+          onSent={(m) => act("coupon.send", { id: blasting.id, phone: m.phone, name: m.name, restricted: blasting.restricted, via: "whatsapp" })}
+          onClose={() => setBlastId(null)}
+        />
+      )}
       {sending && <SendCoupon key={sending.id} coupon={sending} onClose={() => setSendId(null)} />}
     </Page>
   );

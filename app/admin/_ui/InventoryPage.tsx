@@ -2,9 +2,10 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { AdminState, Product } from "@/lib/types";
+import { pointsPerUnit } from "@/lib/loyalty/engine";
 import { rupee } from "@/lib/money";
 import { useAdmin } from "./Store";
-import { Badge, Btn, Empty, Field, Icon, Kpi, Modal, Page, PageHead, SearchBox, Switch, cx, inputCls } from "./kit";
+import { Badge, Btn, Empty, Field, Icon, Kpi, Modal, Page, PageHead, SearchBox, Switch, cx, inputCls, downloadExcel } from "./kit";
 
 const IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 4 MB per image, as agreed with the client.
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -24,13 +25,15 @@ type Form = {
   track: boolean;
   stock: string;
   lowAt: string;
+  /** loyalty points one unit earns; blank = the shop-wide rule (admin only) */
+  loyaltyPoints: string;
   description: string;
   image: string;
   tags: string[];
   active: boolean;
 };
 
-const EMPTY: Form = { name: "", category: "", price: "", track: true, stock: "10", lowAt: "4", description: "", image: "", tags: [], active: true };
+const EMPTY: Form = { name: "", category: "", price: "", track: true, stock: "10", lowAt: "4", loyaltyPoints: "", description: "", image: "", tags: [], active: true };
 const TAGS = [
   ["bestseller", "★ Bestseller"],
   ["new", "New"],
@@ -209,7 +212,7 @@ function StockCell({ p }: { p: Product }) {
 }
 
 export default function InventoryPage() {
-  const { s, act, confirm, toast } = useAdmin();
+  const { s, act, confirm, toast, role } = useAdmin();
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("All");
   const [filter, setFilter] = useState<StockFilter>("all");
@@ -217,11 +220,17 @@ export default function InventoryPage() {
   const [busy, setBusy] = useState(false);
   const [catEdit, setCatEdit] = useState<{ mode: "new" | "rename"; name: string } | null>(null);
   const [manageCats, setManageCats] = useState(false);
+  /* "Manage stock": type the new count for any products, then save them all at once */
+  const [bulk, setBulk] = useState<Record<string, string> | null>(null);
+  const [bulkQ, setBulkQ] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [renameOf, setRenameOf] = useState<string | null>(null);
   const [renaming, setRenaming] = useState("");
   const [move, setMove] = useState<{ p: Product; dir: "added" | "removed"; qty: string; note: string } | null>(null);
 
-  const cats = useMemo(() => Array.from(new Set(s.products.map((p) => p.category))), [s.products]);
+  /* categories in use, plus ones added from Manage categories that have no products yet */
+  const cats = useMemo(() => Array.from(new Set([...s.products.map((p) => p.category), ...s.categories.map((c) => c.name)])), [s.products, s.categories]);
+  const [newCat, setNewCat] = useState("");
   const low = s.products.filter((p) => p.stock !== null && p.stock > 0 && p.stock <= p.lowAt);
   const out = s.products.filter((p) => p.stock !== null && p.stock <= 0);
   const value = s.products.reduce((a, p) => a + (p.stock && p.stock > 0 ? p.stock * p.price : 0), 0);
@@ -251,6 +260,7 @@ export default function InventoryPage() {
             track: p.stock !== null,
             stock: p.stock === null ? "10" : String(p.stock),
             lowAt: String(p.lowAt),
+            loyaltyPoints: p.loyaltyPoints === null ? "" : String(p.loyaltyPoints),
             description: p.description,
             image: p.image,
             tags: p.tags,
@@ -265,6 +275,49 @@ export default function InventoryPage() {
     if (!name) return;
     setForm({ ...form, category: name });
     setCatEdit(null);
+  };
+
+  const exportProducts = () =>
+    downloadExcel(`inventory-${new Date().toISOString().slice(0, 10)}.xlsx`, [
+      {
+        name: "Products",
+        rows: [
+          ["Name", "Category", "Price", "Stock", "Low-stock alert at", "Status", "Loyalty points / item", "On menu", "Description"],
+          ...s.products.map((p) => [p.name, p.category, p.price, p.stock === null ? "Not tracked" : p.stock, p.stock === null ? "" : p.lowAt, p.stock === null ? "Always available" : p.stock <= 0 ? "Sold out" : p.stock <= p.lowAt ? "Low" : "In stock", p.loyaltyPoints === null ? "Automatic" : p.loyaltyPoints, p.active ? "Yes" : "No", p.description]),
+        ],
+      },
+    ]);
+
+  const bulkChanges = bulk
+    ? s.products.flatMap((p) => {
+        const raw = bulk[p.id];
+        if (raw === undefined || raw.trim() === "") return [];
+        const v = Math.floor(Number(raw));
+        return Number.isFinite(v) && v >= 0 && v !== p.stock ? [{ p, v }] : [];
+      })
+    : [];
+  const saveBulk = async () => {
+    setBulkBusy(true);
+    let done = 0;
+    for (const { p, v } of bulkChanges) {
+      // each product's number is set outright; the screen updates at once and the server is re-read after the last one
+      const r = await act("product.stock", { id: p.id, set: v, note: "Bulk stock update" }, { optimistic: withStock(p.id, () => v) });
+      if (!r.ok) break;
+      done++;
+    }
+    setBulkBusy(false);
+    toast({ kind: done === bulkChanges.length ? "ok" : "err", title: done === bulkChanges.length ? `Stock updated for ${done} product${done === 1 ? "" : "s"}` : `Updated ${done} of ${bulkChanges.length} — the rest weren't saved` });
+    if (done === bulkChanges.length) setBulk(null);
+  };
+
+  const addCategory = async () => {
+    const name = newCat.trim();
+    if (!name) return;
+    const r = await act("category.add", { name });
+    if (r.ok) {
+      setNewCat("");
+      toast({ kind: "ok", title: `${name} added` });
+    }
   };
 
   const renameCat = async (from: string) => {
@@ -299,7 +352,7 @@ export default function InventoryPage() {
     const r = await act<Product>("product.save", { ...form, stock: form.track ? form.stock : null });
     setBusy(false);
     if (r.ok) {
-      toast({ kind: "ok", title: form.id ? `${r.result.name} saved` : `${r.result.name} added${r.result.active ? " to the menu" : ""}` });
+      if (!r.pending) toast({ kind: "ok", title: form.id ? `${r.result.name} saved` : `${r.result.name} added${r.result.active ? " to the menu" : ""}` });
       setForm(null);
     }
   };
@@ -311,6 +364,12 @@ export default function InventoryPage() {
         sub="Only products that are on the menu show up on the guest menu."
         right={
           <span className="flex flex-wrap gap-2">
+            <Btn icon="box" onClick={() => (setBulk({}), setBulkQ(""))} disabled={!s.products.length}>
+              Manage stock
+            </Btn>
+            <Btn icon="download" onClick={exportProducts} disabled={!s.products.length}>
+              Download Excel
+            </Btn>
             <Btn icon="edit" onClick={() => setManageCats(true)}>
               Manage categories
             </Btn>
@@ -443,6 +502,7 @@ export default function InventoryPage() {
                       <Btn size="sm" kind="plain" icon="edit" onClick={() => open(p)}>
                         Edit
                       </Btn>
+                      {role === "admin" && (
                       <Btn
                         size="sm"
                         kind="plain"
@@ -455,6 +515,7 @@ export default function InventoryPage() {
                       >
                         <Icon name="trash" size={14} />
                       </Btn>
+                      )}
                     </span>
                   </td>
                 </tr>
@@ -510,7 +571,81 @@ export default function InventoryPage() {
         )}
       </Modal>
 
+      <Modal
+        open={bulk !== null}
+        onClose={() => !bulkBusy && setBulk(null)}
+        wide
+        title="Manage stock"
+        footer={
+          <>
+            <span className="mr-auto self-center text-[13px] text-slate-500">{bulkChanges.length ? `${bulkChanges.length} change${bulkChanges.length === 1 ? "" : "s"} to save` : "Type a new count for any product"}</span>
+            <Btn disabled={bulkBusy} onClick={() => setBulk(null)}>
+              Cancel
+            </Btn>
+            <Btn kind="red" disabled={bulkBusy || !bulkChanges.length} onClick={saveBulk}>
+              {bulkBusy ? "Saving…" : `Save ${bulkChanges.length || ""} change${bulkChanges.length === 1 ? "" : "s"}`}
+            </Btn>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <SearchBox value={bulkQ} onChange={setBulkQ} placeholder="Find a product…" />
+          <p className="text-[12px] text-slate-500">Type the count you now have. Leave a row empty to keep it. Products that aren&apos;t tracked start being tracked when you give them a number. Every change goes into the stock movement log.</p>
+          <div className="adm-scroll max-h-[420px] overflow-auto rounded-xl border border-slate-100">
+            <table className="w-full min-w-[480px] text-[13px]">
+              <thead className="sticky top-0 bg-slate-50 text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 text-left">Product</th>
+                  <th className="px-3 py-2 text-right">Now</th>
+                  <th className="px-3 py-2 text-right">New count</th>
+                  <th className="px-3 py-2 text-right">Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {s.products
+                  .filter((p) => !bulkQ || `${p.name} ${p.category}`.toLowerCase().includes(bulkQ.toLowerCase()))
+                  .map((p) => {
+                    const raw = bulk?.[p.id] ?? "";
+                    const v = Math.floor(Number(raw));
+                    const has = raw.trim() !== "" && Number.isFinite(v) && v >= 0;
+                    const diff = has && p.stock !== null ? v - p.stock : null;
+                    return (
+                      <tr key={p.id} className={cx("border-t border-slate-100", has && v !== p.stock && "bg-amber-50/50")}>
+                        <td className="px-3 py-2">
+                          <b className="block text-slate-900">{p.name}</b>
+                          <span className="text-[11.5px] text-slate-500">{p.category}</span>
+                        </td>
+                        <td className={cx("adm-num px-3 py-2 text-right font-semibold", p.stock !== null && p.stock <= 0 ? "text-red-600" : p.stock !== null && p.stock <= p.lowAt ? "text-amber-600" : "text-slate-700")}>{p.stock === null ? <span className="text-slate-400">Not tracked</span> : p.stock}</td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            className={cx(inputCls, "ml-auto h-9 w-24 text-right")}
+                            type="number"
+                            min={0}
+                            step={1}
+                            inputMode="numeric"
+                            value={raw}
+                            placeholder={p.stock === null ? "Track…" : String(p.stock)}
+                            onChange={(e) => setBulk({ ...(bulk ?? {}), [p.id]: e.target.value })}
+                            aria-label={`New stock for ${p.name}`}
+                          />
+                        </td>
+                        <td className={cx("adm-num px-3 py-2 text-right font-bold", diff === null ? "text-slate-300" : diff > 0 ? "text-emerald-700" : diff < 0 ? "text-red-600" : "text-slate-400")}>{diff === null ? (has && p.stock === null ? "tracking on" : "—") : diff > 0 ? `+${diff}` : diff}</td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Modal>
+
       <Modal open={manageCats} onClose={() => setManageCats(false)} title="Manage categories" footer={<Btn onClick={() => setManageCats(false)}>Done</Btn>}>
+        <div className="mb-3 flex gap-2">
+          <input className={inputCls} value={newCat} maxLength={40} placeholder="New category, e.g. Shakes" onChange={(e) => setNewCat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCategory()} />
+          <Btn kind="red" icon="plus" disabled={!newCat.trim()} onClick={addCategory}>
+            Add
+          </Btn>
+        </div>
         <ul className="grid gap-2">
           {cats.map((c) => (
             <li key={c} className="flex items-center gap-3 rounded-xl border border-slate-100 px-4 py-2.5">
@@ -539,11 +674,16 @@ export default function InventoryPage() {
                   >
                     Rename
                   </Btn>
+                  {role === "admin" && !s.products.some((p) => p.category === c) && (
+                    <Btn size="sm" kind="plain" className="text-red-600" onClick={() => act("category.delete", { name: c })}>
+                      Remove
+                    </Btn>
+                  )}
                 </>
               )}
             </li>
           ))}
-          {!cats.length && <p className="text-[13px] text-slate-500">No categories yet — add a product to create one.</p>}
+          {!cats.length && <p className="text-[13px] text-slate-500">No categories yet — add one above.</p>}
         </ul>
       </Modal>
 
@@ -616,6 +756,17 @@ export default function InventoryPage() {
                   </div>
                 )}
               </div>
+              {role === "admin" ? (
+                <Field
+                  label="Loyalty points per item"
+                  className="sm:col-span-2"
+                  hint={`Points one ${form.name || "item"} earns a member. Leave blank for the automatic rule${form.price ? ` (currently ${pointsPerUnit({ id: form.id ?? "", category: form.category, price: Number(form.price) || 0, loyaltyPoints: null }, s.loyaltyEarn)} pts)` : ""}. Customers see this on the menu.`}
+                >
+                  <input className={inputCls} type="number" min={0} step={1} inputMode="numeric" placeholder="Automatic" value={form.loyaltyPoints} onChange={(e) => setForm({ ...form, loyaltyPoints: e.target.value })} />
+                </Field>
+              ) : (
+                <p className="rounded-xl bg-slate-50 px-4 py-2.5 text-[12.5px] text-slate-500 sm:col-span-2">Loyalty points for this item are set by the admin.</p>
+              )}
               <Field label="Description" className="sm:col-span-2">
                 <textarea className={cx(inputCls, "h-20 resize-none py-3")} maxLength={240} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="One line that makes it irresistible." />
               </Field>

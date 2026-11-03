@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Batch, Ingredient, IngredientUnit, Product, Recipe } from "@/lib/types";
+import { INGREDIENT_UNITS, type Batch, type Ingredient, type IngredientUnit, type Product, type Recipe } from "@/lib/types";
 import { rupee } from "@/lib/money";
 import { useAdmin } from "./Store";
-import { Badge, Btn, Card, Empty, Field, Icon, Kpi, Modal, Page, PageHead, SearchBox, cx, inputCls } from "./kit";
+import { Badge, Btn, Card, Empty, Field, Icon, Kpi, Modal, Page, PageHead, SearchBox, cx, downloadExcel, inputCls } from "./kit";
 
 /* ============================================================
    RAW-INGREDIENT INVENTORY
@@ -15,7 +15,7 @@ import { Badge, Btn, Card, Empty, Field, Icon, Kpi, Modal, Page, PageHead, Searc
    the admin can filter and download as Excel-friendly CSV.
    ============================================================ */
 
-const UNIT_LABEL: Record<IngredientUnit, string> = { g: "g", ml: "ml" };
+const UNIT_LABEL = Object.fromEntries(INGREDIENT_UNITS.map((u) => [u.key, u.key])) as Record<IngredientUnit, string>;
 
 const num3 = (n: number) => Math.round(n * 1000) / 1000;
 const fmtQty = (n: number, unit: IngredientUnit) => `${num3(n).toLocaleString("en-IN", { maximumFractionDigits: 3 })}${unit}`;
@@ -37,7 +37,10 @@ function IngredientModal({ initial, onClose }: { initial: IngForm; onClose: () =
     setBusy(true);
     const r = await act("ingredient.save", { id: f.id, name: f.name, unit: f.unit, lowAt: Number(f.lowAt) || 0 });
     setBusy(false);
-    if (r.ok) { toast({ kind: "ok", title: f.id ? "Ingredient updated." : "Ingredient added." }); onClose(); }
+    if (r.ok) {
+      if (!r.pending) toast({ kind: "ok", title: f.id ? "Ingredient updated." : "Ingredient added." });
+      onClose();
+    }
   };
   return (
     <Modal open onClose={onClose} title={f.id ? "Edit ingredient" : "New ingredient"} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind="dark" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</Btn></>}>
@@ -45,13 +48,13 @@ function IngredientModal({ initial, onClose }: { initial: IngForm; onClose: () =
         <Field label="Name"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Sugar, Milk, Flour…" autoFocus /></Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Measured in">
-            <div className="flex rounded-xl bg-slate-100 p-1">
-              {(["g", "ml"] as const).map((u) => (
-                <button key={u} type="button" onClick={() => setF({ ...f, unit: u })} className={cx("h-10 flex-1 rounded-lg text-[13px] font-bold uppercase tracking-wide transition", f.unit === u ? "bg-white text-slate-900 shadow" : "text-slate-500")}>
-                  {u === "g" ? "Grams (g)" : "Millilitres (ml)"}
-                </button>
+            <select className={inputCls} value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value as IngredientUnit })}>
+              {INGREDIENT_UNITS.map((u) => (
+                <option key={u.key} value={u.key}>
+                  {u.label}
+                </option>
               ))}
-            </div>
+            </select>
           </Field>
           <Field label={`Low-stock warning (${f.unit})`} hint="Flagged in the list when stock falls to or below this.">
             <input className={inputCls} inputMode="decimal" value={f.lowAt} onChange={(e) => setF({ ...f, lowAt: e.target.value.replace(/[^\d.]/g, "") })} placeholder="e.g. 500" />
@@ -239,7 +242,7 @@ function ItemPicker({ ingredients: ings, products, initialKind = "all", onPick, 
 }
 
 function BatchModal({ ingredients: ings, products, recipes, onClose }: { ingredients: Ingredient[]; products: Product[]; recipes: Recipe[]; onClose: () => void }) {
-  const { act, confirm, toast } = useAdmin();
+  const { act, confirm, toast, role } = useAdmin();
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
   const [rows, setRows] = useState<Row[]>([blankRow()]);
@@ -408,6 +411,7 @@ function BatchModal({ ingredients: ings, products, recipes, onClose }: { ingredi
                           <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-slate-800">{r.name}</span>
                           <span className="shrink-0 text-[11.5px] text-slate-500">{r.items.length} ingredient{r.items.length === 1 ? "" : "s"}</span>
                         </button>
+                        {role === "admin" && (
                         <button
                           type="button"
                           onClick={() => removeRecipe(r.id)}
@@ -417,6 +421,7 @@ function BatchModal({ ingredients: ings, products, recipes, onClose }: { ingredi
                         >
                           <Icon name="trash" size={14} />
                         </button>
+                        )}
                       </div>
                     ))}
                 </div>
@@ -493,7 +498,7 @@ function BatchModal({ ingredients: ings, products, recipes, onClose }: { ingredi
 
 /* ---------------- the main page ---------------- */
 export default function IngredientsPage() {
-  const { s, act, confirm, toast } = useAdmin();
+  const { s, act, confirm, toast, role } = useAdmin();
   const [edit, setEdit] = useState<IngForm | null>(null);
   const [move, setMove] = useState<{ ing: Ingredient; kind: MoveKind } | null>(null);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -527,6 +532,7 @@ export default function IngredientsPage() {
             <Link href="/admin/inventory/ingredient-moves" className="inline-flex h-9 items-center gap-2 rounded-xl bg-slate-100 px-3.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-200">
               <Icon name="list" size={16} /> Movements log
             </Link>
+            <Btn kind="soft" icon="download" disabled={!ings.length} onClick={() => downloadExcel(`ingredients-new Date().toISOString().slice(0, 10).xlsx`, [{ name: "Ingredients", rows: [["Ingredient", "Unit", "In stock", "Low-stock warning", "Cost per unit", "Stock value", "Status"], ...ings.filter((i) => i.active).map((i) => [i.name, i.unit, i.stock, i.lowAt, i.costPerUnit, Math.round(i.stock * i.costPerUnit * 100) / 100, i.stock <= 0 ? "Out" : i.lowAt > 0 && i.stock <= i.lowAt ? "Low" : "OK"])] }])}>Excel</Btn>
             <Btn kind="soft" icon="plus" onClick={() => setEdit(EMPTY_ING)}>New ingredient</Btn>
             <Btn kind="dark" icon="orders" onClick={() => setBatchOpen(true)} disabled={active.length === 0} title={active.length === 0 ? "Add an ingredient first" : "Log a batch"}>Log a batch</Btn>
           </>
@@ -562,7 +568,10 @@ export default function IngredientsPage() {
                     return (
                       <tr key={i.id} className="border-t border-slate-100">
                         <td className={td}>
-                          <b className="block text-[13.5px] text-slate-900">{i.name}</b>
+                          <b className="block text-[13.5px] text-slate-900">
+                            {i.name}
+                            {s.approvals.some((x) => x.status === "pending" && x.targetId === i.id) && <Badge tone="amber" className="ml-2">Awaiting admin</Badge>}
+                          </b>
                           <span className="text-[11.5px] text-slate-500">Measured in {UNIT_LABEL[i.unit]}{i.lowAt > 0 ? ` · warn at ${fmtQty(i.lowAt, i.unit)}` : ""}</span>
                         </td>
                         <td className={cx(td, "text-right")}>
@@ -576,7 +585,7 @@ export default function IngredientsPage() {
                           <Btn size="sm" kind="soft" onClick={() => setMove({ ing: i, kind: "waste" })}>Waste</Btn>{" "}
                           <Btn size="sm" onClick={() => setMove({ ing: i, kind: "adjust" })}>Adjust</Btn>{" "}
                           <Btn size="sm" onClick={() => setEdit({ id: i.id, name: i.name, unit: i.unit, lowAt: String(i.lowAt) })}>Edit</Btn>{" "}
-                          <Btn size="sm" kind="red" onClick={() => removeIng(i)}>×</Btn>
+                          {role === "admin" && <Btn size="sm" kind="red" onClick={() => removeIng(i)}>×</Btn>}
                         </td>
                       </tr>
                     );

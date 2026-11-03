@@ -32,14 +32,15 @@ export default async function CouponPage({ params, searchParams }: { params: Pro
     );
   }
 
-  const { coupon: c, shopName } = found;
-  const st = couponStatus({ ...c, id: "", restricted: c.restricted, phones: [], sent: 0, createdAt: 0 });
-  const rules = [c.minOrder ? `On orders of ${rupee(c.minOrder)} or more` : "On any order", c.expiresAt ? `Valid till ${ddmmyyyy(c.expiresAt)}` : "No expiry", c.restricted ? "Only for the mobile number it was sent to" : ""].filter(Boolean);
+  const { coupon: c, shopName, logoUrl } = found;
+  const st = couponStatus({ ...c, id: "", restricted: c.restricted, audience: c.audience, phones: [], sent: 0, createdAt: 0 });
+  const rules = [c.minOrder ? `On orders of ${rupee(c.minOrder)} or more` : "On any order", c.expiresAt ? `Valid till ${ddmmyyyy(c.expiresAt)}` : "No expiry", c.audience === "loyalty" ? "For loyalty members only" : c.audience === "regular" ? "For non-loyalty customers only" : "", c.restricted ? "Only for the mobile number it was sent to" : ""].filter(Boolean);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-slate-100 px-4 py-10 text-slate-900">
       <div className="w-full max-w-md overflow-hidden rounded-3xl bg-slate-900 text-white shadow-2xl">
         <div className="p-7">
+          {logoUrl && <img src={logoUrl} alt="" style={{ height: 44, width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: 10, display: "block" }} />}
           <p className="text-[12px] font-extrabold uppercase tracking-[0.2em] text-red-300">{shopName}</p>
           <p className="mt-1 text-[15px] font-semibold text-slate-200">{name ? `A gift for ${name}` : "A gift for you"}</p>
           <p className="mt-3 text-[56px] font-black leading-none">{c.percent}% OFF</p>

@@ -70,6 +70,7 @@ export function seedData(): { products: Product[]; coupons: Coupon[]; shopName: 
     price,
     stock,
     lowAt: 4,
+    loyaltyPoints: null,
     description,
     image: U(img),
     eggless,
@@ -83,7 +84,7 @@ export function seedData(): { products: Product[]; coupons: Coupon[]; shopName: 
     shopName: "8:2's chayakkada",
     products,
     coupons: [
-      { id: "scoupon1", code: "WELCOME10", percent: 10, minOrder: 500, expiresAt: null, limit: 100, used: 0, active: true, restricted: false, phones: [], sent: 0, createdAt: now },
+      { id: "scoupon1", code: "WELCOME10", percent: 10, minOrder: 500, expiresAt: null, limit: 100, used: 0, active: true, restricted: false, audience: "all", phones: [], sent: 0, createdAt: now },
     ],
   };
 }

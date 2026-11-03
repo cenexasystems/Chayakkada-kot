@@ -56,6 +56,8 @@ export const products = pgTable("products", {
   price: money("price").notNull(),
   stock: integer("stock"),
   lowAt: integer("low_at").notNull().default(4),
+  /** loyalty points one unit earns; null = use the shop-wide earn rule. Set by the admin. */
+  loyaltyPoints: integer("loyalty_points"),
   description: text("description").notNull().default(""),
   image: text("image").notNull().default(""),
   eggless: boolean("eggless").notNull().default(false),
@@ -169,6 +171,8 @@ export const coupons = pgTable(
     phones: jsonb("phones").$type<string[]>().notNull().default([]),
     /** how many times it has been sent */
     sent: integer("sent").notNull().default(0),
+    /** who may use it: everyone, only non-loyalty customers, or only loyalty members */
+    audience: text("audience").$type<"all" | "regular" | "loyalty">().notNull().default("all"),
     createdAt: ms("created_at").notNull(),
   },
   (t) => [uniqueIndex("coupons_code_uq").on(t.code)],
@@ -208,6 +212,104 @@ export const expenses = pgTable(
     createdAt: ms("created_at").notNull(),
   },
   (t) => [index("expenses_date_idx").on(t.expenseDate)],
+);
+
+/** Changes staff ask for that the admin must approve before they take effect. */
+export const approvalRequests = pgTable(
+  "approval_requests",
+  {
+    id: text("id").primaryKey(),
+    /** the op to run if approved, e.g. "ingredient.save" */
+    kind: text("kind").notNull(),
+    targetId: text("target_id").notNull(),
+    targetName: text("target_name").notNull().default(""),
+    /** the arguments the op will run with */
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    /** what the target looked like when the request was made, for the admin to compare */
+    before: jsonb("before").$type<Record<string, unknown> | null>(),
+    requestedBy: text("requested_by").notNull().default("staff"),
+    status: text("status").$type<"pending" | "approved" | "rejected">().notNull().default("pending"),
+    decidedBy: text("decided_by").notNull().default(""),
+    createdAt: ms("created_at").notNull(),
+    decidedAt: ms("decided_at"),
+  },
+  (t) => [index("approval_requests_status_idx").on(t.status, t.createdAt)],
+);
+
+/** Product categories the shop has set up — including ones with no products yet. (A product keeps
+    its category as plain text, so the menu still works from the products alone.) */
+export const productCategories = pgTable(
+  "product_categories",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("product_categories_name_uq").on(sql`lower(${t.name})`)],
+);
+
+/** Who changed what: one row for every change made in the admin console, by the admin or by staff. */
+export const activityLog = pgTable(
+  "activity_log",
+  {
+    id: text("id").primaryKey(),
+    /** "admin" or "staff" */
+    actor: text("actor").notNull(),
+    /** the op that ran, e.g. "product.save" */
+    action: text("action").notNull(),
+    /** what it was done to — a product name, an invoice number, a member… */
+    target: text("target").notNull().default(""),
+    /** "done" = applied; "requested" = staff asked and the admin has to approve */
+    outcome: text("outcome").notNull().default("done"),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [index("activity_log_created_idx").on(t.createdAt)],
+);
+
+/** Who the shop buys from — kept apart from expenses so each purchase invoice can be tracked. */
+export const suppliers = pgTable(
+  "suppliers",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    contactPerson: text("contact_person").notNull().default(""),
+    phone: text("phone").notNull().default(""),
+    email: text("email").notNull().default(""),
+    /** 15-character GST number of the supplier */
+    gstin: text("gstin").notNull().default(""),
+    address: text("address").notNull().default(""),
+    /** what they supply, e.g. "Milk, dairy" */
+    supplies: text("supplies").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [uniqueIndex("suppliers_name_uq").on(t.name)],
+);
+
+/** A purchase invoice from a supplier: price before GST, the GST on it, and what has been paid. */
+export const supplierInvoices = pgTable(
+  "supplier_invoices",
+  {
+    id: text("id").primaryKey(),
+    supplierId: text("supplier_id").notNull(),
+    invoiceNo: text("invoice_no").notNull(),
+    /** YYYY-MM-DD on the supplier's invoice */
+    invoiceDate: text("invoice_date").notNull(),
+    /** price before GST */
+    price: money("price").notNull(),
+    gstPercent: money("gst_percent").notNull().default(0),
+    gstAmount: money("gst_amount").notNull().default(0),
+    /** price + GST */
+    total: money("total").notNull(),
+    paidAmount: money("paid_amount").notNull().default(0),
+    paymentMode: text("payment_mode").notNull().default("cash"),
+    /** YYYY-MM-DD, blank when unpaid / no due date */
+    dueDate: text("due_date").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    createdAt: ms("created_at").notNull(),
+  },
+  (t) => [index("supplier_invoices_supplier_idx").on(t.supplierId), index("supplier_invoices_date_idx").on(t.invoiceDate)],
 );
 
 /** The shop's own list of expense categories. Expenses keep the category as plain text,

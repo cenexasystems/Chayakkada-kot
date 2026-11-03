@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { Product } from "@/lib/types";
 import { rupee } from "@/lib/money";
+import { pointsPerUnit } from "@/lib/loyalty/engine";
 import { useAdmin } from "./Store";
 import { Btn, Icon, Modal, SearchBox, cx } from "./kit";
 
@@ -96,6 +97,7 @@ export default function Catalog({
         {list.map((p) => {
           const out = p.stock !== null && p.stock <= 0;
           const n = cart[p.id] ?? 0;
+          const pts = pointsPerUnit(p, s.loyaltyEarn);
           return (
             <li key={p.id}>
               <div
@@ -109,7 +111,7 @@ export default function Catalog({
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13.5px] font-semibold text-slate-900">{p.name}</p>
                   <p className="text-[12px] text-slate-500">
-                    <b className="text-slate-800">{rupee(p.price)}</b> · {p.stock === null ? "always available" : out ? <span className="text-red-600">sold out</span> : `${p.stock} in stock`}
+                    <b className="text-slate-800">{rupee(p.price)}</b>{pts > 0 && <b className="ml-1.5 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700" title="Loyalty points a member earns">+{pts} pts</b>} · {p.stock === null ? "always available" : out ? <span className="text-red-600">sold out</span> : `${p.stock} in stock`}
                   </p>
                 </div>
                 {onPick ? (

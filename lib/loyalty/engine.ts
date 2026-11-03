@@ -154,7 +154,22 @@ export type EarnCtx = {
   tier: TierKey;
   firstPurchase: boolean;
   campaigns: Campaign[];
+  /** fixed points one unit of a product earns, as set by the admin; null/undefined = use the earn rule */
+  pointsOf?: (productId: string | null) => number | null | undefined;
 };
+
+/** Points one unit of a product earns: the admin's fixed number if there is one, otherwise the shop-wide rule.
+    (A real bill rounds once over all its lines, so for rule-based items this is the per-item share.) */
+export function pointsPerUnit(p: { id: string; category: string; price: number; loyaltyPoints?: number | null }, cfg: { enabled: boolean; earn: LoyaltyConfig["earn"] }): number {
+  const e = cfg.earn;
+  if (!cfg.enabled) return 0;
+  if (e.excludedProductIds.includes(p.id) || e.excludedCategories.includes(p.category)) return 0;
+  if (p.loyaltyPoints !== null && p.loyaltyPoints !== undefined) return Math.max(0, p.loyaltyPoints);
+  const rule = e.rules.find((r) => (r.target === "product" ? r.key === p.id : r.key === p.category));
+  const raw = (e.mode === "percent" ? (p.price * e.percent) / 100 : (p.price / 100) * e.per100) * (rule ? rule.multiplier : 1);
+  const round = e.rounding === "ceil" ? Math.ceil : e.rounding === "round" ? Math.round : Math.floor;
+  return Math.max(0, round(raw + 1e-9));
+}
 
 /** Points a paid bill earns, line by line. The base is what the customer actually paid
     for eligible items — after all discounts, without GST or extra charges. */
@@ -163,11 +178,17 @@ export function earnFor(c: EarnCtx): { eligibleNet: number; parts: EarnPart[]; t
   const ratio = c.subtotal > 0 ? Math.max(0, c.subtotal - c.discount) / c.subtotal : 0;
   let net = 0;
   let weighted = 0;
+  let fixed = 0; // items the admin gave a set number of points
   for (const it of c.items) {
     if (excluded(it, c.catOf, e.excludedProductIds, e.excludedCategories)) continue;
     const amt = it.price * it.qty * ratio;
-    const rule = e.rules.find((r) => (r.target === "product" ? r.key === it.productId : r.key === c.catOf(it.productId)));
     net += amt;
+    const own = c.pointsOf ? c.pointsOf(it.productId) : null;
+    if (own !== null && own !== undefined) {
+      fixed += Math.max(0, own) * it.qty;
+      continue;
+    }
+    const rule = e.rules.find((r) => (r.target === "product" ? r.key === it.productId : r.key === c.catOf(it.productId)));
     weighted += amt * (rule ? rule.multiplier : 1);
   }
   const eligibleNet = round2(net);
@@ -177,7 +198,7 @@ export function earnFor(c: EarnCtx): { eligibleNet: number; parts: EarnPart[]; t
   const tierMult = tierByKey(c.tier, c.cfg).multiplier;
   const multCamps = c.campaigns.filter((x) => x.type === "multiplier");
   const campMult = multCamps.reduce((m, x) => Math.max(m, x.value), 1);
-  const raw = e.mode === "percent" ? (weighted * e.percent) / 100 : (weighted / 100) * e.per100;
+  const raw = (e.mode === "percent" ? (weighted * e.percent) / 100 : (weighted / 100) * e.per100) + fixed;
   let purchase = round(raw * tierMult * campMult + 1e-9) + e.fixedPerBill;
   if (e.maxPerBill > 0) purchase = Math.min(purchase, e.maxPerBill);
 

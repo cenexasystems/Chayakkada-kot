@@ -228,7 +228,7 @@ export default function TabsPage({ focus }: { focus?: string }) {
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <Link href={`/admin/billing?tab=${f.session.id}`} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-red-600 text-[13px] font-semibold text-white shadow-[0_6px_16px_-8px_rgba(220,38,38,.8)] hover:bg-red-700">
+                <Link href={`/admin/billing?tab=${f.session.id}`} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-red-600 text-[13px] font-semibold text-white shadow-[0_6px_16px_-8px_rgba(107, 117, 80,.8)] hover:bg-red-700">
                   <Icon name="billing" size={16} /> Bill this tab
                 </Link>
                 <Btn size="lg" icon="plus" onClick={() => setAddFor({ sessionId: f.session.id })} className="h-11">

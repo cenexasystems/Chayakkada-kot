@@ -68,17 +68,18 @@ export function Receipt({ b, shop, details, fmt = DEFAULT_FORMAT }: { b: Bill; s
   return (
     <>
       <style>{pageCss(fmt)}</style>
-      {fmt.kind === "thermal" ? <Thermal b={b} shop={shop} lines={headerLines(details)} roll={fmt.roll} /> : <Sheet b={b} shop={shop} lines={headerLines(details)} size={fmt.size} />}
+      {fmt.kind === "thermal" ? <Thermal b={b} shop={shop} logo={details?.logoUrl} lines={headerLines(details)} roll={fmt.roll} /> : <Sheet b={b} shop={shop} logo={details?.logoUrl} lines={headerLines(details)} size={fmt.size} />}
     </>
   );
 }
 
 /** Full-page invoice for A3 / A4 / A5 — one layout, scaled by the paper size. */
-function Sheet({ b, shop, lines, size }: { b: Bill; shop: string; lines: string[]; size: "A3" | "A4" | "A5" }) {
+function Sheet({ b, shop, logo, lines, size }: { b: Bill; shop: string; logo?: string; lines: string[]; size: "A3" | "A4" | "A5" }) {
   return (
     <div className={`inv inv--${size.toLowerCase()}`}>
       <header className="inv__head">
         <div>
+          {logo && <img src={logo} alt="" style={{ height: 56, width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: 6, display: "block" }} />}
           <h1>{shop}</h1>
           {lines.map((l, i) => <p key={i}>{l}</p>)}
         </div>
@@ -200,9 +201,10 @@ function Sheet({ b, shop, lines, size }: { b: Bill; shop: string; lines: string[
   );
 }
 
-function Thermal({ b, shop, lines, roll }: { b: Bill; shop: string; lines: string[]; roll: 2 | 3 }) {
+function Thermal({ b, shop, logo, lines, roll }: { b: Bill; shop: string; logo?: string; lines: string[]; roll: 2 | 3 }) {
   return (
     <div className={`rcpt rcpt--${roll}`} style={{ width: `${ROLL_MM[roll][1]}mm` }}>
+      {logo && <img src={logo} alt="" style={{ height: 44, width: "auto", maxWidth: "100%", objectFit: "contain", margin: "0 auto 4px", display: "block" }} />}
       <h1>{shop}</h1>
       {lines.map((l, i) => <p className="c" key={i}>{l}</p>)}
       <hr />

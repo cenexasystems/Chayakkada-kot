@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { rupee } from "@/lib/money";
-import { TIER_KEYS, type TierKey } from "@/lib/loyalty/config";
+import type { TierKey } from "@/lib/loyalty/config";
 import { campaignLive, rewardAvailable, SEGMENTS, tierByKey } from "@/lib/loyalty/engine";
 import type { Campaign, LoyaltyState, Reward, Segment } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
 import { Badge, Btn, Empty, Field, Modal, cx, fmtDate, inputLineCls } from "../kit";
+import { OfferSend } from "./OfferSend";
 
 const chip = (on: boolean) => cx("h-8 rounded-lg border px-3 text-[12px] font-bold transition", on ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400");
 
@@ -16,7 +17,7 @@ function TierPicker({ value, onChange, d }: { value: TierKey[]; onChange: (v: Ti
       <button type="button" className={chip(!value.length)} onClick={() => onChange([])}>
         All tiers
       </button>
-      {TIER_KEYS.map((k) => (
+      {d.config.tiers.map((t) => t.key).map((k) => (
         <button key={k} type="button" className={chip(value.includes(k))} onClick={() => onChange(value.includes(k) ? value.filter((x) => x !== k) : [...value, k])}>
           {tierByKey(k, d.config).name}
         </button>
@@ -31,7 +32,7 @@ type RF = { id?: string; name: string; description: string; imageUrl: string; ca
 const RBLANK: RF = { name: "", description: "", imageUrl: "", category: "", kind: "free_item", value: "", productId: "", pointsCost: "100", tiers: [], startsOn: "", endsOn: "", active: true, maxRedemptions: "", perCustomerLimit: "", terms: "" };
 
 export function Rewards({ d }: { d: LoyaltyState }) {
-  const { s, act, confirm, toast } = useAdmin();
+  const { s, act, confirm, toast, role } = useAdmin();
   const [f, setF] = useState<RF | null>(null);
   const [busy, setBusy] = useState(false);
   const prod = (id: string | null) => s.products.find((p) => p.id === id)?.name;
@@ -41,7 +42,7 @@ export function Rewards({ d }: { d: LoyaltyState }) {
     const r = await act<Reward>("loyalty.reward.save", { ...f, maxRedemptions: f.maxRedemptions || null, perCustomerLimit: f.perCustomerLimit || null });
     setBusy(false);
     if (r.ok) {
-      toast({ kind: "ok", title: `${r.result.name} saved` });
+      if (!r.pending) toast({ kind: "ok", title: `${r.result.name} saved` });
       setF(null);
     }
   };
@@ -88,9 +89,11 @@ export function Rewards({ d }: { d: LoyaltyState }) {
                   <Btn size="sm" icon="edit" onClick={() => edit(r)}>
                     Edit
                   </Btn>
-                  <Btn size="sm" kind="warn" icon="trash" onClick={() => del(r)}>
-                    Remove
-                  </Btn>
+                  {role === "admin" && (
+                    <Btn size="sm" kind="warn" icon="trash" onClick={() => del(r)}>
+                      Remove
+                    </Btn>
+                  )}
                 </div>
               </div>
             );
@@ -187,10 +190,27 @@ type CF = { id?: string; name: string; description: string; type: Campaign["type
 const CBLANK: CF = { name: "", description: "", type: "multiplier", value: "2", startsOn: "", endsOn: "", startTime: "", endTime: "", days: [], minPurchase: "", tiers: [], segments: [], categories: [], usageLimit: "", perCustomerLimit: "", active: true };
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+/* The WhatsApp wording for a campaign, built from what it actually does and when it runs. */
+function campaignMessage(c: Campaign) {
+  const what = c.type === "multiplier" ? `${c.value}× loyalty points` : `${c.value} bonus loyalty points`;
+  const when = [
+    c.startsOn || c.endsOn ? `${c.startsOn ? `from ${c.startsOn}` : ""}${c.startsOn && c.endsOn ? " " : ""}${c.endsOn ? `till ${c.endsOn}` : ""}` : "",
+    c.days.length ? `on ${c.days.map((x) => WD[x]).join(", ")}` : "",
+    c.startTime || c.endTime ? `${c.startTime || "00:00"}–${c.endTime || "23:59"}` : "",
+  ].filter(Boolean).join(", ");
+  return [
+    "Hi {name}! 🎁",
+    `Special offer for our loyalty members at {shop}: *${c.name}* — earn *${what}*${when ? ` ${when}` : ""}${c.minPurchase ? ` on bills of ₹${c.minPurchase}+` : ""}.`,
+    c.description,
+    "Just show your mobile number at billing. See you soon!",
+  ].filter(Boolean).join("\n");
+}
+
 export function Campaigns({ d }: { d: LoyaltyState }) {
-  const { s, act, confirm, toast, now } = useAdmin();
+  const { s, act, confirm, toast, now, role } = useAdmin();
   const [f, setF] = useState<CF | null>(null);
   const [busy, setBusy] = useState(false);
+  const [offer, setOffer] = useState<Campaign | null>(null);
   const cats = [...new Set(s.products.map((p) => p.category).filter(Boolean))].sort();
   const save = async () => {
     if (!f) return;
@@ -198,7 +218,7 @@ export function Campaigns({ d }: { d: LoyaltyState }) {
     const r = await act<Campaign>("loyalty.campaign.save", { ...f, usageLimit: f.usageLimit || null, perCustomerLimit: f.perCustomerLimit || null });
     setBusy(false);
     if (r.ok) {
-      toast({ kind: "ok", title: `${r.result.name} saved` });
+      if (!r.pending) toast({ kind: "ok", title: `${r.result.name} saved` });
       setF(null);
     }
   };
@@ -242,17 +262,33 @@ export function Campaigns({ d }: { d: LoyaltyState }) {
                 </p>
                 <p className="text-[11px] text-slate-400">Created {fmtDate(c.createdAt)}</p>
                 <div className="mt-3 flex gap-2">
+                  <Btn size="sm" kind="green" disabled={!c.active} onClick={() => setOffer(c)}>
+                    Send to members
+                  </Btn>
                   <Btn size="sm" icon="edit" onClick={() => edit(c)}>
                     Edit
                   </Btn>
-                  <Btn size="sm" kind="warn" icon="trash" onClick={() => del(c)}>
-                    Remove
-                  </Btn>
+                  {role === "admin" && (
+                    <Btn size="sm" kind="warn" icon="trash" onClick={() => del(c)}>
+                      Remove
+                    </Btn>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
+      )}
+
+      {offer && (
+        <OfferSend
+          key={offer.id}
+          title={`Send offer · ${offer.name}`}
+          who={[offer.tiers.length ? offer.tiers.map((t) => tierByKey(t, d.config).name).join("/") + " tier" : "all tiers", offer.segments.length ? offer.segments.map((x) => SEGMENTS.find((y) => y.key === x)?.label).join("/") : ""].filter(Boolean).join(", ")}
+          template={campaignMessage(offer)}
+          filter={({ customer, segment }) => (!offer.tiers.length || offer.tiers.includes(customer.tier)) && (!offer.segments.length || (!!segment && offer.segments.includes(segment)))}
+          onClose={() => setOffer(null)}
+        />
       )}
 
       {f && (

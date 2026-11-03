@@ -13,24 +13,24 @@
   /* token names are kept from the original theme so every stylesheet re-paints:
      cocoa → charcoal, cream/paper → creamy white, cherry → tomato red,
      caramel → golden yellow, rose → soft orange */
-  --cocoa: #1d1a18;
-  --cocoa-2: #2b2623;
-  --cocoa-3: #3b3430;
-  --ganache: #4d433c;
-  --cream: #fff6e3;
-  --cream-2: #fde9bf;
-  --paper: #fffaf0;
-  --ink: #211c18;
-  --ink-soft: #6b5f55;
-  --cherry: #e03a1e;
-  --cherry-deep: #b92a10;
-  --cherry-lite: #ff7a45;
-  --pistachio: #8fcf6a;
-  --caramel: #ffb81c;
-  --rose: #ffc7a3;
+  --cocoa: #20241a;
+  --cocoa-2: #2b3022;
+  --cocoa-3: #383e2c;
+  --ganache: #4a5139;
+  --cream: #f3f4e1;
+  --cream-2: #e4e8c8;
+  --paper: #f8f9ec;
+  --ink: #1f2218;
+  --ink-soft: #5f6650;
+  --cherry: #6b7550;
+  --cherry-deep: #515b3b;
+  --cherry-lite: #8e9b68;
+  --pistachio: #a9c47f;
+  --caramel: #d6b04a;
+  --rose: #d9dfb8;
 
-  --line-dark: rgba(255, 246, 227, 0.14);
-  --line-light: rgba(33, 28, 24, 0.14);
+  --line-dark: rgba(243, 244, 225, 0.16);
+  --line-light: rgba(31, 34, 24, 0.14);
 
   --display: var(--font-display), Georgia, "Times New Roman", serif;
   --body: var(--font-body), system-ui, -apple-system, "Segoe UI", sans-serif;

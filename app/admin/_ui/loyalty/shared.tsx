@@ -7,7 +7,7 @@ import { statsFrom } from "@/lib/loyalty/engine";
 import type { TierKey } from "@/lib/loyalty/config";
 import { useAdmin } from "../Store";
 import { Badge, cx } from "../kit";
-import { TIER_TONE } from "./billing";
+import { tierTone } from "./billing";
 
 /** The Loyalty page's data, fetched separately from the main admin state and
     refreshed whenever the shop's data version moves. */
@@ -63,7 +63,7 @@ export function useStatsByPhone(bills: Bill[], frequentDays: number) {
 export const EMPTY_STATS: PurchaseStats = { orders: 0, visits: 0, spent: 0, aov: 0, first: null, last: null, recentVisits: 0 };
 
 export function TierBadge({ tier, name }: { tier: TierKey; name: string }) {
-  return <Badge tone={TIER_TONE[tier]}>{name}</Badge>;
+  return <Badge tone={tierTone(tier)}>{name}</Badge>;
 }
 
 export const LEDGER_LABEL: Record<string, string> = {

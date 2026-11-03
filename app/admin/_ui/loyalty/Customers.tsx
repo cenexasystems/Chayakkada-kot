@@ -7,6 +7,8 @@ import type { LedgerEntry, LoyaltyCustomer, LoyaltyState, Voucher } from "@/lib/
 import type { Bill } from "@/lib/types";
 import { useAdmin } from "../Store";
 import { waLink } from "../receipt";
+import { EnrolledStep } from "./billing";
+import { MemberUpdate, type MemberNotice } from "./notify";
 import { Badge, Btn, Drawer, Empty, Field, Icon, Modal, SearchBox, WaIcon, cx, downloadExcel, fmtDate, fmtDateTime, inputLineCls } from "../kit";
 import { EMPTY_STATS, LEDGER_LABEL, Pager, TierBadge, tableWrap, td, th, usePaged, useStatsByPhone } from "./shared";
 
@@ -145,16 +147,17 @@ function RegisterModal({ onClose, onDone }: { onClose: () => void; onDone: (id: 
   const { act, toast } = useAdmin();
   const [f, setF] = useState({ phone: "", name: "", email: "", birthday: "", anniversary: "", referralCode: "", consent: true });
   const [busy, setBusy] = useState(false);
+  const [member, setMember] = useState<LoyaltyCustomer | null>(null);
   const save = async () => {
     setBusy(true);
     const r = await act<LoyaltyCustomer>("loyalty.register", f);
     setBusy(false);
     if (r.ok) {
       toast({ kind: "ok", title: `${r.result.name} enrolled — ${r.result.code}` });
-      onClose();
-      onDone(r.result.id);
+      setMember(r.result);
     }
   };
+  if (member) return <EnrolledStep member={member} onClose={() => { onClose(); onDone(member.id); }} />;
   return (
     <Modal
       open
@@ -493,19 +496,24 @@ function Profile({ c, d, bills, onClose }: { c: LoyaltyCustomer; d: LoyaltyState
   );
 }
 
+/* Runs a member action. When it succeeds and a message is given, the WhatsApp update for the
+   member is offered next (`notice` — a modal to return in place of the form) instead of closing. */
 function useSubmit(onClose: () => void) {
   const { act, toast } = useAdmin();
   const [busy, setBusy] = useState(false);
-  const run = async (op: string, args: Record<string, unknown>, ok: string) => {
+  const [notify, setNotify] = useState<MemberNotice | null>(null);
+  const run = async (op: string, args: Record<string, unknown>, ok: string, tell?: MemberNotice) => {
     setBusy(true);
     const r = await act(op, args);
     setBusy(false);
     if (r.ok) {
-      toast({ kind: "ok", title: ok });
-      onClose();
+      if (!r.pending) toast({ kind: "ok", title: ok });
+      if (tell && !r.pending && tell.phone) setNotify(tell);
+      else onClose();
     }
   };
-  return { busy, run };
+  const notice = notify ? <MemberUpdate {...notify} onClose={onClose} /> : null;
+  return { busy, run, notice };
 }
 
 function EditModal({ c, onClose }: { c: LoyaltyCustomer; onClose: () => void }) {
@@ -540,12 +548,13 @@ function EditModal({ c, onClose }: { c: LoyaltyCustomer; onClose: () => void }) 
 }
 
 function AdjustModal({ c, onClose }: { c: LoyaltyCustomer; onClose: () => void }) {
-  const { busy, run } = useSubmit(onClose);
+  const { busy, run, notice } = useSubmit(onClose);
   const [pts, setPts] = useState("");
   const [reason, setReason] = useState("");
   const n = Math.trunc(Number(pts) || 0);
+  if (notice) return notice;
   return (
-    <Modal open onClose={onClose} title={`Adjust points · ${c.name}`} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind="red" disabled={busy || !n || !reason.trim()} onClick={() => run("loyalty.adjust", { id: c.id, points: n, reason }, `Points ${n > 0 ? "added" : "removed"}`)}>Apply</Btn></>}>
+    <Modal open onClose={onClose} title={`Adjust points · ${c.name}`} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind="red" disabled={busy || !n || !reason.trim()} onClick={() => run("loyalty.adjust", { id: c.id, points: n, reason }, `Points ${n > 0 ? "added" : "removed"}`, { phone: c.phone, name: c.name, kind: "adjust", vars: { points: n > 0 ? `+${n}` : String(n), reason } })}>Apply</Btn></>}>
       <div className="space-y-3">
         <p className="text-[13px] text-slate-600">Available now: <b>{c.available}</b> pts. Use a minus sign to remove points. Adjustments don&apos;t change the member&apos;s tier.</p>
         <Field label="Points (+ or −)">
@@ -560,11 +569,12 @@ function AdjustModal({ c, onClose }: { c: LoyaltyCustomer; onClose: () => void }
 }
 
 function StatusModal({ c, onClose }: { c: LoyaltyCustomer; onClose: () => void }) {
-  const { busy, run } = useSubmit(onClose);
+  const { busy, run, notice } = useSubmit(onClose);
   const [reason, setReason] = useState("");
   const off = c.status === "active";
+  if (notice) return notice;
   return (
-    <Modal open onClose={onClose} title={off ? `Deactivate ${c.name}?` : `Reactivate ${c.name}?`} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind={off ? "red" : "dark"} disabled={busy || !reason.trim()} onClick={() => run("loyalty.status", { id: c.id, status: off ? "inactive" : "active", reason }, off ? "Loyalty account deactivated" : "Loyalty account reactivated")}>{off ? "Deactivate" : "Reactivate"}</Btn></>}>
+    <Modal open onClose={onClose} title={off ? `Deactivate ${c.name}?` : `Reactivate ${c.name}?`} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind={off ? "red" : "dark"} disabled={busy || !reason.trim()} onClick={() => run("loyalty.status", { id: c.id, status: off ? "inactive" : "active", reason }, off ? "Loyalty account deactivated" : "Loyalty account reactivated", { phone: c.phone, name: c.name, kind: "status", vars: { status: off ? "deactivated" : "active again" } })}>{off ? "Deactivate" : "Reactivate"}</Btn></>}>
       <div className="space-y-3">
         <p className="text-[13px] text-slate-600">{off ? "They stop earning and can't redeem until reactivated. Their points and history are kept. Normal billing is unaffected." : "They can earn and redeem again."}</p>
         <Field label="Reason (required)">
@@ -579,7 +589,9 @@ function IssueModal({ c, d, onClose }: { c: LoyaltyCustomer; d: LoyaltyState; on
   const { act, toast } = useAdmin();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<Voucher | null>(null);
+  const [tell, setTell] = useState(false);
   const list = d.rewards.filter((r) => r.active);
+  if (tell && done) return <MemberUpdate phone={c.phone} name={c.name} kind="reward" vars={{ reward: done.name, ref: done.ref, expires: done.expiresAt ? fmtDate(done.expiresAt) : "no expiry" }} onClose={onClose} />;
   const issue = async (id: string) => {
     setBusy(true);
     const r = await act<Voucher>("loyalty.issueReward", { id: c.id, rewardId: id });
@@ -599,6 +611,9 @@ function IssueModal({ c, d, onClose }: { c: LoyaltyCustomer; d: LoyaltyState; on
           <b className="text-slate-900">{done.name}</b>
           <p className="font-mono text-[22px] font-extrabold tracking-wider">{done.ref}</p>
           <p className="text-[12.5px] text-slate-500">Pick it under Loyalty → Reward on their next bill. Valid 30 days.</p>
+          <Btn kind="green" onClick={() => setTell(true)}>
+            Send on WhatsApp
+          </Btn>
           <Btn onClick={onClose}>Done</Btn>
         </div>
       ) : !list.length ? (
@@ -627,12 +642,13 @@ function IssueModal({ c, d, onClose }: { c: LoyaltyCustomer; d: LoyaltyState; on
 }
 
 function RefundModal({ b, onClose }: { b: Bill; onClose: () => void }) {
-  const { busy, run } = useSubmit(onClose);
+  const { busy, run, notice } = useSubmit(onClose);
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const a = Number(amount) || 0;
+  if (notice) return notice;
   return (
-    <Modal open onClose={onClose} title={`Partial refund · ${b.invoiceNo}`} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind="red" disabled={busy || !(a > 0 && a <= b.total) || !reason.trim()} onClick={() => run("loyalty.refund", { billId: b.id, amount: a, reason }, "Points adjusted for the refund")}>Take back points</Btn></>}>
+    <Modal open onClose={onClose} title={`Partial refund · ${b.invoiceNo}`} footer={<><Btn onClick={onClose}>Cancel</Btn><Btn kind="red" disabled={busy || !(a > 0 && a <= b.total) || !reason.trim()} onClick={() => run("loyalty.refund", { billId: b.id, amount: a, reason }, "Points adjusted for the refund", { phone: b.customerPhone, name: b.customerName, kind: "adjust", vars: { points: `-${Math.round((b.pointsEarned * a) / (b.total || 1))}`, reason } })}>Take back points</Btn></>}>
       <div className="space-y-3">
         <p className="text-[13px] text-slate-600">
           Records the loyalty side of a partial refund: takes back the share of the {b.pointsEarned} pts this {rupee(b.total)} bill earned. It doesn&apos;t change the bill or move money — for a full refund, void the bill on the Orders page (points are reversed automatically).

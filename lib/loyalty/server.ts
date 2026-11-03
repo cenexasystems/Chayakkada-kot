@@ -36,7 +36,7 @@ const num = (v: unknown) => {
 const optInt = (v: unknown) => (v === null || v === undefined || v === "" ? null : Math.floor(num(v)));
 const first = async <T>(rows: Promise<T[]>): Promise<T | null> => (await rows)[0] ?? null;
 const strs = (v: unknown, max = 100) => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim().slice(0, 80)))].slice(0, max) : []);
-const tiersOf = (v: unknown): TierKey[] => strs(v).filter((x): x is TierKey => (TIER_KEYS as string[]).includes(x));
+const tiersOf = (v: unknown): TierKey[] => strs(v).filter((x) => /^[a-z0-9_-]{1,20}$/.test(x));
 const day = (v: unknown) => {
   const x = str(v, 10);
   if (x && !/^\d{4}-\d{2}-\d{2}$/.test(x)) throw new ApiError("Dates should be picked from the calendar.");
@@ -67,6 +67,13 @@ const SYSTEM = "system";
 export async function getConfig(q: Q): Promise<LoyaltyConfig> {
   const r = await first(q.select().from(loyaltySettings).where(eq(loyaltySettings.id, 1)));
   return r ? sanitizeConfig(r.config) : DEFAULT_CONFIG;
+}
+
+/** The fixed points per unit the admin set on products (absent = the earn rule). */
+async function pointsMap(q: Q) {
+  const rows = await q.select({ id: products.id, pts: products.loyaltyPoints }).from(products);
+  const m = new Map(rows.filter((r) => r.pts !== null).map((r) => [r.id, r.pts as number]));
+  return (pid: string | null) => (pid ? m.get(pid) ?? null : null);
 }
 
 async function catMap(q: Q): Promise<CatOf> {
@@ -440,6 +447,14 @@ export async function planBill(tx: Tx, x: { phone: string; items: OrderItem[]; s
   return { cfg, customer: c, reward, rewardDiscount, rewardName, points: wantPoints, pointsDiscount };
 }
 
+/** Is this mobile an active loyalty member? Decides which audience of coupons it can use. */
+export async function isMember(q: Q, phone: string | null | undefined) {
+  const p = (phone ?? "").replace(/\D/g, "").slice(-10);
+  if (!p) return false;
+  const c = await byPhone(q, p);
+  return !!c && c.status === "active";
+}
+
 /** Members' points still on the plan's customer, used by createBill to stamp the bill. */
 export async function memberFor(tx: Tx, phone: string) {
   if (!phone) return null;
@@ -489,7 +504,7 @@ export async function afterBill(tx: Tx, bill: Bill, plan: LoyaltyPlan | null, ac
     }
     camps.push(k);
   }
-  const earn = earnFor({ cfg, items: bill.items, catOf, subtotal: bill.subtotal, discount: bill.discount, tier: c.tier, firstPurchase, campaigns: camps });
+  const earn = earnFor({ cfg, items: bill.items, catOf, pointsOf: await pointsMap(tx), subtotal: bill.subtotal, discount: bill.discount, tier: c.tier, firstPurchase, campaigns: camps });
   let earned = 0;
   const usedCamps = new Map<string, number>();
   for (const p of earn.parts) {
@@ -991,6 +1006,7 @@ export async function walletView(tokenRaw: unknown) {
   const lapsed = lots.filter((l) => (l.expiresAt ?? Infinity) < now).reduce((a, l) => a + l.remaining, 0);
   return {
     shopName: shop?.n ?? "Cafe",
+    logoUrl: shop?.logo?.startsWith("data:") ? `/shop-logo?v=${shop.logo.length}` : shop?.logo ?? "",
     config: cfg,
     customer: { code: c.code, name: c.name, tier: c.tier, available: c.available - lapsed, lifetime: c.lifetime, redeemed: c.redeemed, expired: c.expired, stamps: c.stamps, referralCode: c.referralCode, status: c.status, createdAt: c.createdAt },
     ledger: ledger.map((l) => ({ id: l.id, type: l.type, points: l.points, description: l.description, invoiceNo: l.invoiceNo, createdAt: l.createdAt })),

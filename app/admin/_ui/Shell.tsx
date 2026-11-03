@@ -1,5 +1,6 @@
 "use client";
 
+import ApprovalPopup from "./ApprovalPopup";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -20,6 +21,8 @@ const NAV: Nav[] = [
   { href: "/admin/inventory/ingredient-moves", label: "Ingredient log", icon: "list", roles: ["admin", "staff"] },
   { href: "/admin/inventory/movements", label: "Stock movement", icon: "list", roles: ["admin"] },
   { href: "/admin/expenses", label: "Expenses", icon: "bag", roles: ["admin"] },
+  { href: "/admin/suppliers", label: "Suppliers", icon: "users", roles: ["admin"] },
+  { href: "/admin/activity", label: "Activity log", icon: "list", roles: ["admin"] },
   { href: "/admin/coupons", label: "Coupons", icon: "coupon", roles: ["admin"] },
   { href: "/admin/loyalty", label: "Loyalty", icon: "star", roles: ["admin", "staff"] },
 ];
@@ -35,7 +38,7 @@ const Cherry = ({ logo }: { logo?: string }) =>
       <circle cx="16" cy="7" r="1" fill="#fff6e3" />
       <circle cx="21" cy="9.5" r="1" fill="#fff6e3" />
       <path d="M3 16.5c3 1.6 4 1.6 6.5 0s4 1.6 6.5 1.6 4-3.2 6.5-1.6 3.5 1.6 6.5 0v1.5H3z" fill="#7bc043" />
-      <rect x="4" y="19" width="24" height="3.5" rx="1.75" fill="#e03a1e" />
+      <rect x="4" y="19" width="24" height="3.5" rx="1.75" fill="#6b7550" />
       <path d="M4 23.5h24v1.5a3.5 3.5 0 0 1-3.5 3.5h-17A3.5 3.5 0 0 1 4 25z" fill="#ffb81c" />
     </svg>
   );
@@ -388,6 +391,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <div className="text-[14px] leading-relaxed text-slate-600">{pending?.body}</div>
         </Modal>
 
+        {role === "admin" && <ApprovalPopup />}
         {settings && <Settings onClose={() => setSettings(false)} />}
         <div id="adm-layer" />
       </div>

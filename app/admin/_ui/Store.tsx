@@ -3,7 +3,7 @@
 import { subscribeChanges } from "@/lib/realtime";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import type { AdminState, Order, Session } from "@/lib/types";
+import { APPROVAL_VERBS, type AdminState, type Order, type Session } from "@/lib/types";
 import type { Role } from "@/lib/auth";
 import { round2 } from "@/lib/money";
 
@@ -14,7 +14,8 @@ import { round2 } from "@/lib/money";
 
 export type Toast = { id: number; kind: "ok" | "err" | "order" | "bill" | "info"; title: string; body?: string; href?: string };
 type ConfirmReq = { title: string; body?: React.ReactNode; ok?: string; danger?: boolean };
-export type ActResult<T = unknown> = { ok: true; result: T } | { ok: false; error: string };
+/** `pending` = staff made a change that is now waiting for the admin's approval — nothing has changed yet. */
+export type ActResult<T = unknown> = { ok: true; result: T; pending?: boolean } | { ok: false; error: string };
 /** `optimistic` paints the expected result straight away and lets the server catch up in
     the background; if the server says no, the screen goes back to what the server has. */
 export type ActOpts = { optimistic?: (s: AdminState) => AdminState };
@@ -214,6 +215,10 @@ export function AdminProvider({ initial, role, children }: { initial: AdminState
         }
         ok = true;
         if (!fast) await poll();
+        if (d.result && typeof d.result === "object" && (d.result as { pendingApproval?: boolean }).pendingApproval) {
+          toast({ kind: "info", title: "Sent to the admin for approval", body: "It takes effect once the admin approves it." });
+          return { ok: true, result: d.result as T, pending: true };
+        }
         return { ok: true, result: d.result as T };
       } catch {
         toast({ kind: "err", title: "Network problem — check the connection and try again." });
@@ -255,6 +260,65 @@ export function AdminProvider({ initial, role, children }: { initial: AdminState
       toast({ kind: "bill", title: `${whoIs(x)} asked for the bill`, body: `${x.customerName || "A guest"} is ready to pay.`, href: `/admin/billing?tab=${x.id}` });
     }
     if (ring) chime();
+  }, [s, toast, chime]);
+
+  /* ---------- approvals ----------
+     The admin is told (popup + chime) when staff ask for a change; staff are told how it ended. */
+  const apprSeen = useRef<Map<string, string> | null>(null);
+  useEffect(() => {
+    const now = new Map(s.approvals.map((x) => [x.id, x.status + ":" + x.createdAt]));
+    const prev = apprSeen.current;
+    apprSeen.current = now;
+    if (!prev) return;
+    let ring = false;
+    for (const x of s.approvals) {
+      const before = prev.get(x.id);
+      if (before === now.get(x.id)) continue;
+      if (role === "admin" && x.status === "pending") {
+        ring = true;
+        toast({ kind: "info", title: `${x.requestedBy} wants to ${APPROVAL_VERBS[x.kind] ?? x.kind} ${x.targetName}`, body: "Approve or reject it in the popup." });
+      } else if (role !== "admin" && before?.startsWith("pending") && x.status !== "pending") {
+        toast({ kind: x.status === "approved" ? "ok" : "err", title: x.status === "approved" ? `Admin approved: ${x.targetName}` : `Admin rejected the change to ${x.targetName}` });
+      }
+    }
+    if (ring) chime();
+  }, [s.approvals, role, toast, chime]);
+
+  /* ---------- low-stock alerts ----------
+     An item alerts when it falls to its warning level ("low") or hits zero ("out") — once per
+     change, not on every refresh. On first load one summary says how many are already low. */
+  const stockSeen = useRef<Map<string, "low" | "out"> | null>(null);
+  useEffect(() => {
+    const now = new Map<string, "low" | "out">();
+    const names = new Map<string, string>();
+    for (const p of s.products) {
+      if (!p.active || p.stock === null) continue;
+      if (p.stock <= 0) now.set(`p:${p.id}`, "out");
+      else if (p.stock <= p.lowAt) now.set(`p:${p.id}`, "low");
+      names.set(`p:${p.id}`, `${p.name} (${p.stock} left)`);
+    }
+    for (const i of s.ingredients ?? []) {
+      if (!i.active || !(i.lowAt > 0)) continue;
+      if (i.stock <= 0) now.set(`i:${i.id}`, "out");
+      else if (i.stock <= i.lowAt) now.set(`i:${i.id}`, "low");
+      names.set(`i:${i.id}`, `${i.name} (${i.stock} ${i.unit} left)`);
+    }
+    const prev = stockSeen.current;
+    stockSeen.current = now;
+    if (!prev) {
+      if (now.size) toast({ kind: "info", title: `${now.size} item${now.size === 1 ? " is" : "s are"} low on stock`, body: "Open Inventory to restock.", href: "/admin/inventory" });
+      return;
+    }
+    const worse = [...now].filter(([k, v]) => prev.get(k) !== v && !(prev.get(k) === "out" && v === "low"));
+    if (!worse.length) return;
+    const out = worse.filter(([, v]) => v === "out").length;
+    toast({
+      kind: "info",
+      title: out ? `${out} item${out === 1 ? "" : "s"} sold out · ${worse.length - out} low` : `Low stock: ${worse.length} item${worse.length === 1 ? "" : "s"}`,
+      body: worse.slice(0, 3).map(([k]) => names.get(k)).join(", ") + (worse.length > 3 ? ` +${worse.length - 3} more` : ""),
+      href: "/admin/inventory",
+    });
+    chime();
   }, [s, toast, chime]);
 
   /* ---------- confirm ---------- */

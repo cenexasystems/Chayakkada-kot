@@ -19,7 +19,7 @@
   background: var(--cocoa);
   color: var(--cream);
   text-decoration: none;
-  box-shadow: 0 22px 40px -18px rgba(29, 26, 24, 0.85), 0 0 0 1px rgba(255, 246, 227, 0.08) inset;
+  box-shadow: 0 22px 40px -18px rgba(29, 26, 24, 0.85), 0 0 0 1px rgba(243, 244, 225, 0.08) inset;
   translate: -50% 0;
   animation: tbar-in 0.9s var(--ease) calc(var(--intro) + 0.25s) both;
   transition: transform 0.4s var(--ease-back);
@@ -59,7 +59,7 @@
   flex: 1;
   min-width: 0;
   font: 400 14px/1.3 var(--body);
-  color: rgba(255, 246, 227, 0.75);
+  color: rgba(243, 244, 225, 0.75);
 }
 .tbar__txt b {
   display: block;
@@ -131,12 +131,12 @@
   height: 38px;
   border-radius: 50%;
   color: var(--cream);
-  background: rgba(255, 246, 227, 0.08);
+  background: rgba(243, 244, 225, 0.08);
   rotate: 180deg;
   transition: background-color 0.25s;
 }
 .tm-top__back:hover {
-  background: rgba(255, 246, 227, 0.16);
+  background: rgba(243, 244, 225, 0.16);
 }
 .tm-brand {
   display: inline-flex;
@@ -155,7 +155,7 @@
   padding: 0 6px 0 14px;
   border: 0;
   border-radius: 999px;
-  background: rgba(255, 246, 227, 0.1);
+  background: rgba(243, 244, 225, 0.1);
   color: var(--cream);
   font: 600 11px/1 var(--body);
   letter-spacing: 0.16em;
@@ -178,7 +178,7 @@
   transition: background-color 0.25s;
 }
 .tm-tabbtn:hover {
-  background: rgba(255, 246, 227, 0.18);
+  background: rgba(243, 244, 225, 0.18);
 }
 
 /* ---------- live order status (pinned under the header) ---------- */
@@ -286,7 +286,7 @@
 .tm-hero__sub {
   max-width: 520px;
   margin: 0 0 22px;
-  color: rgba(255, 246, 227, 0.72);
+  color: rgba(243, 244, 225, 0.72);
   font-size: 15px;
   animation: tm-rise 0.9s var(--ease) 0.12s both;
 }
@@ -310,12 +310,12 @@
   border-radius: 16px;
   background: var(--cocoa-2);
   box-shadow: 0 0 0 1px var(--line-dark) inset;
-  color: rgba(255, 246, 227, 0.55);
+  color: rgba(243, 244, 225, 0.55);
   transition: box-shadow 0.25s;
 }
 /* focus just lifts the hairline — no red ring around the search */
 .tm-search:focus-within {
-  box-shadow: 0 0 0 1px rgba(255, 246, 227, 0.32) inset;
+  box-shadow: 0 0 0 1px rgba(243, 244, 225, 0.32) inset;
 }
 .tm-search input {
   flex: 1;
@@ -327,7 +327,7 @@
   font: 400 16px/1 var(--body);
 }
 .tm-search input::placeholder {
-  color: rgba(255, 246, 227, 0.4);
+  color: rgba(243, 244, 225, 0.4);
 }
 
 /* ---------- category rail ---------- */
@@ -492,7 +492,7 @@
   margin-right: 6px;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(255, 184, 28, 0.25);
+  background: rgba(214, 176, 74, 0.25);
   color: #8a5a00;
   font: 600 10px/1.3 var(--body);
   letter-spacing: 0.1em;
@@ -919,7 +919,7 @@
   margin: 12px 0 0;
   padding: 10px 14px;
   border-radius: 12px;
-  background: rgba(224, 58, 30, 0.1);
+  background: rgba(107, 117, 80, 0.1);
   color: var(--cherry-deep);
   font-size: 14px;
   font-weight: 500;
@@ -1212,15 +1212,15 @@
 .tm-rcpt {
   padding: 20px 18px 18px;
   border-radius: 18px;
-  background: repeating-linear-gradient(var(--cream) 0 26px, rgba(33, 28, 24, 0.045) 26px 27px);
-  box-shadow: 0 0 0 1px rgba(33, 28, 24, 0.08) inset;
+  background: repeating-linear-gradient(var(--cream) 0 26px, rgba(31, 34, 24, 0.045) 26px 27px);
+  box-shadow: 0 0 0 1px rgba(31, 34, 24, 0.08) inset;
 }
 .tm-rcpt__head {
   display: grid;
   justify-items: center;
   gap: 4px;
   padding-bottom: 14px;
-  border-bottom: 1.5px dashed rgba(33, 28, 24, 0.22);
+  border-bottom: 1.5px dashed rgba(31, 34, 24, 0.22);
   text-align: center;
 }
 .tm-rcpt__head b {
@@ -1257,7 +1257,7 @@
   justify-content: space-between;
   gap: 14px;
   padding-top: 12px;
-  border-top: 1.5px dashed rgba(33, 28, 24, 0.22);
+  border-top: 1.5px dashed rgba(31, 34, 24, 0.22);
 }
 .tm-rcpt__total span {
   font: 600 11px/1 var(--body);
@@ -1426,7 +1426,7 @@
   height: 44px;
   padding: 0 14px;
   border-radius: 12px;
-  border: 1.5px dashed rgba(33, 28, 24, 0.3);
+  border: 1.5px dashed rgba(31, 34, 24, 0.3);
   background: transparent;
   font: 600 14px/1 var(--body);
   letter-spacing: 0.12em;
@@ -1515,8 +1515,8 @@
 
 .tm-hero {
   background:
-    radial-gradient(circle at 88% 8%, rgba(255, 184, 28, 0.38), transparent 42%),
-    radial-gradient(circle at 6% 100%, rgba(224, 58, 30, 0.5), transparent 46%),
+    radial-gradient(circle at 88% 8%, rgba(214, 176, 74, 0.38), transparent 42%),
+    radial-gradient(circle at 6% 100%, rgba(107, 117, 80, 0.5), transparent 46%),
     linear-gradient(160deg, var(--cocoa-2), var(--cocoa));
 }
 .tm-hero__hi {
@@ -1537,10 +1537,10 @@
   rotate: -2deg;
 }
 .tm-search {
-  background: rgba(255, 246, 227, 0.1);
+  background: rgba(243, 244, 225, 0.1);
   border-radius: 999px;
   padding: 0 20px;
-  box-shadow: 0 0 0 1.5px rgba(255, 246, 227, 0.2) inset;
+  box-shadow: 0 0 0 1.5px rgba(243, 244, 225, 0.2) inset;
 }
 .tm-search:focus-within {
   box-shadow: 0 0 0 2px var(--caramel) inset;
@@ -1591,12 +1591,12 @@
   border: 0;
   border-radius: 24px;
   background: #fff;
-  box-shadow: 0 1px 0 rgba(33, 28, 24, 0.04), 0 10px 26px -16px rgba(33, 28, 24, 0.4);
+  box-shadow: 0 1px 0 rgba(31, 34, 24, 0.04), 0 10px 26px -16px rgba(31, 34, 24, 0.4);
   transition: transform 0.35s var(--ease), box-shadow 0.35s var(--ease);
 }
 .tm-item:hover {
   transform: translateY(-4px);
-  box-shadow: 0 2px 0 rgba(33, 28, 24, 0.04), 0 22px 34px -18px rgba(185, 42, 16, 0.45);
+  box-shadow: 0 2px 0 rgba(31, 34, 24, 0.04), 0 22px 34px -18px rgba(185, 42, 16, 0.45);
 }
 .tm-item.is-in {
   box-shadow: 0 0 0 2px var(--caramel), 0 18px 30px -18px rgba(185, 42, 16, 0.45);
@@ -1694,7 +1694,7 @@
 }
 .tm-field input:focus,
 .tm-field textarea:focus {
-  box-shadow: 0 0 0 3px rgba(255, 184, 28, 0.35);
+  box-shadow: 0 0 0 3px rgba(214, 176, 74, 0.35);
 }
 .tm-ticket__total b,
 .tm-tab__head b {
@@ -1749,7 +1749,7 @@
   padding: 16px 18px;
   border-radius: 20px;
   background: #fff;
-  box-shadow: 0 10px 24px -18px rgba(33, 28, 24, 0.4);
+  box-shadow: 0 10px 24px -18px rgba(31, 34, 24, 0.4);
   font-size: 14px;
   color: var(--ink-soft);
 }
@@ -1773,4 +1773,18 @@
 }
 .tm-contact__card a:hover {
   color: var(--cherry);
+}
+
+/* loyalty points an item earns, next to its price */
+.tm-pts {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--caramel) 22%, transparent);
+  color: var(--cocoa-3);
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
 }

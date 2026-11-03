@@ -81,6 +81,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
         {/* Header */}
         <div className="flex flex-col items-start justify-between gap-6 border-b border-zinc-200 pb-6 sm:flex-row">
           <div className="space-y-1">
+            {details?.logoUrl && <img src={details.logoUrl} alt="" style={{ height: 56, width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: 6, display: "block" }} />}
             <h1 className="text-xl font-bold tracking-tight text-zinc-900 uppercase sm:text-2xl">{shop}</h1>
             {addrLines.map((l, i) => (
               <p key={i} className="max-w-xs text-xs leading-relaxed text-zinc-500">{l}</p>

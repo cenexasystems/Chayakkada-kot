@@ -248,7 +248,7 @@ export function Kpi({ label, value, hint, icon, tone = "emerald", small, details
 
 /* ---------------- controls ---------------- */
 const BTN = {
-  red: "bg-red-600 text-white hover:bg-red-700 shadow-[0_6px_16px_-8px_rgba(220,38,38,.8)]",
+  red: "bg-red-600 text-white hover:bg-red-700 shadow-[0_6px_16px_-8px_rgba(107, 117, 80,.8)]",
   dark: "bg-slate-900 text-white hover:bg-slate-700",
   ghost: "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50",
   soft: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100",
@@ -378,7 +378,7 @@ export function Pills<T extends string>({ label, value, options, onChange, class
           onClick={() => onChange(o.v)}
           className={cx(
             "h-8 shrink-0 whitespace-nowrap rounded-full px-4 text-[12px] font-bold uppercase transition",
-            value === o.v ? "bg-red-600 text-white shadow-[0_4px_10px_-4px_rgba(220,38,38,.9)]" : "text-slate-700 hover:bg-slate-100",
+            value === o.v ? "bg-red-600 text-white shadow-[0_4px_10px_-4px_rgba(107, 117, 80,.9)]" : "text-slate-700 hover:bg-slate-100",
           )}
         >
           {o.t}

@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from "react";
 import type { Bill } from "@/lib/types";
-import { rupee } from "@/lib/money";
+import { round2, rupee, shopToday } from "@/lib/money";
 import { completedIn, customerStats, expensesIn, gstReport, isoWeek, itemStats, monthly, rangeOf, splitGst, startOfWeek, paymentStats, summary, weekly, type Period } from "@/lib/analytics";
 import Link from "next/link";
 import { useAdmin } from "./Store";
 import { useLedger } from "./ledger";
-import { Badge, Btn, Card, DateRange, Empty, Kpi, Page, PageHead, Pills, SearchBox, Switch, Tabs, cx, downloadExcel, fmtDate, fmtTime, type ExcelSheet } from "./kit";
+import { Badge, Btn, Card, DateRange, Empty, Icon, Kpi, Page, PageHead, Pills, SearchBox, Switch, Tabs, cx, downloadExcel, fmtDate, fmtTime, type ExcelSheet } from "./kit";
 
 type Tab = "revenue" | "today" | "products" | "customers" | "coupons";
 
@@ -457,7 +457,7 @@ export default function AnalyticsPage() {
         <div className="adm-in space-y-5">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <Kpi label="Net earnings" value={rupee(net)} hint={sum.gst > 0 ? "Revenue − GST − expenses" : "Revenue − expenses"} icon="rupee" tone={net >= 0 ? "emerald" : "red"} />
-            <Kpi label="Total revenue" value={rupee(sum.revenue)} hint={sum.gst > 0 ? `Includes ${rupee(sum.gst)} GST collected` : "Customer tabs + counter combined"} icon="rupee" tone="emerald" />
+            <Kpi label="Total revenue" value={rupee(sum.revenue)} hint={sum.gst > 0 ? `Includes ${rupee(sum.gst)} GST collected` : "Customer tabs + counter combined"} icon="rupee" tone="emerald" details={<RevenueBreakdown bills={inPeriod} periodLabel={periodLabel} />} />
             <Kpi label="Total expenses" value={rupee(expensesTotal)} hint="From the Expenses tab" icon="bag" tone="rose" />
             <Kpi label="Discounts given" value={rupee(sum.discount)} hint={`${sum.discounted} discounted bills`} icon="coupon" tone="violet" />
           </div>
@@ -885,6 +885,142 @@ function CustomersTab({ bills }: { bills: Bill[] }) {
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+/* What the Total revenue box opens to: how the money came in — cash, UPI (GPay / QR), card — plus
+   what coupons took off, and a day-by-day tracker of the same, downloadable as Excel. */
+function RevenueBreakdown({ bills, periodLabel }: { bills: Bill[]; periodLabel: string }) {
+  const total = round2(bills.reduce((n, b) => n + b.total, 0));
+  const by = useMemo(() => {
+    const days = new Map<string, { date: string; cash: number; upi: number; card: number; coupon: number; total: number; bills: number }>();
+    const coupons = new Map<string, { code: string; bills: number; off: number }>();
+    for (const b of bills) {
+      const date = shopToday(b.createdAt);
+      const d = days.get(date) ?? { date, cash: 0, upi: 0, card: 0, coupon: 0, total: 0, bills: 0 };
+      d.cash += b.cashAmount;
+      d.upi += b.upiAmount;
+      d.card += b.cardAmount;
+      d.coupon += b.couponDiscount;
+      d.total += b.total;
+      d.bills++;
+      days.set(date, d);
+      if (b.couponCode && b.couponDiscount > 0) {
+        const c = coupons.get(b.couponCode) ?? { code: b.couponCode, bills: 0, off: 0 };
+        c.bills++;
+        c.off += b.couponDiscount;
+        coupons.set(b.couponCode, c);
+      }
+    }
+    return { days: [...days.values()].sort((a, b) => (a.date < b.date ? 1 : -1)), coupons: [...coupons.values()].sort((a, b) => b.off - a.off) };
+  }, [bills]);
+
+  const cash = round2(bills.reduce((n, b) => n + b.cashAmount, 0));
+  const upi = round2(bills.reduce((n, b) => n + b.upiAmount, 0));
+  const card = round2(bills.reduce((n, b) => n + b.cardAmount, 0));
+  const couponOff = round2(bills.reduce((n, b) => n + b.couponDiscount, 0));
+  const couponBills = bills.filter((b) => b.couponDiscount > 0).length;
+  const rows = [
+    { label: "Cash", amount: cash, n: bills.filter((b) => b.cashAmount > 0).length, bar: "bg-emerald-500" },
+    { label: "UPI / GPay / QR", amount: upi, n: bills.filter((b) => b.upiAmount > 0).length, bar: "bg-violet-500" },
+    { label: "Card", amount: card, n: bills.filter((b) => b.cardAmount > 0).length, bar: "bg-sky-500" },
+  ];
+  const d2 = (d: string) => d.split("-").reverse().join("/");
+
+  const exportExcel = () =>
+    downloadExcel(`revenue-by-payment-${periodLabel}-${new Date().toISOString().slice(0, 10)}`, [
+      {
+        name: "Summary",
+        rows: [
+          ["Payment", "Amount", "Bills"],
+          ...rows.map((r) => [r.label, r.amount, r.n]),
+          ["Total revenue", total, bills.length],
+          [],
+          ["Coupon discounts given", couponOff, couponBills],
+        ],
+      },
+      { name: "Day by day", rows: [["Date", "Bills", "Cash", "UPI / GPay / QR", "Card", "Coupon discount", "Total"], ...by.days.map((d) => [d2(d.date), d.bills, round2(d.cash), round2(d.upi), round2(d.card), round2(d.coupon), round2(d.total)])] },
+      { name: "Coupons", rows: [["Coupon", "Bills", "Discount given"], ...by.coupons.map((c) => [c.code, c.bills, round2(c.off)])] },
+    ]);
+
+  if (!bills.length) return <p className="py-6 text-center text-[13px] text-slate-400">No completed bills in this period yet.</p>;
+  return (
+    <div className="space-y-5">
+      <div>
+        <h4 className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Collected by payment method</h4>
+        <ul className="space-y-3">
+          {rows.map((r) => (
+            <li key={r.label}>
+              <div className="mb-1 flex items-baseline justify-between gap-3 text-[13px]">
+                <b className="text-slate-800">{r.label}</b>
+                <span className="adm-num font-bold text-slate-900">
+                  {rupee(r.amount)} <span className="font-medium text-slate-400">· {r.n} bill{r.n === 1 ? "" : "s"} · {total ? Math.round((r.amount / total) * 100) : 0}%</span>
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div className={cx("h-full rounded-full", r.bar)} style={{ width: `${total ? Math.min(100, (r.amount / total) * 100) : 0}%` }} />
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-3 flex items-center justify-between rounded-xl bg-amber-50 px-4 py-2.5 text-[13px]">
+          <span className="font-bold text-amber-900">Coupons — discount given</span>
+          <span className="adm-num font-extrabold text-amber-900">
+            {rupee(couponOff)} <span className="font-medium text-amber-700">· {couponBills} bill{couponBills === 1 ? "" : "s"}</span>
+          </span>
+        </div>
+        {by.coupons.length > 0 && (
+          <ul className="mt-2 divide-y divide-slate-100 rounded-xl border border-slate-100 text-[12.5px]">
+            {by.coupons.map((c) => (
+              <li key={c.code} className="flex justify-between px-3.5 py-2">
+                <span className="font-mono font-bold tracking-wider text-slate-700">{c.code}</span>
+                <span className="text-slate-600">
+                  {c.bills} bill{c.bills === 1 ? "" : "s"} · {rupee(c.off)} off
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-2 text-[11.5px] text-slate-400">A split bill counts in each method it used. Cash + UPI + card adds up to total revenue ({rupee(total)}).</p>
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h4 className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Day-by-day tracker</h4>
+          <button type="button" onClick={exportExcel} className="inline-flex items-center gap-1.5 text-[12.5px] font-bold text-emerald-700 hover:underline">
+            <Icon name="download" size={14} /> Excel
+          </button>
+        </div>
+        <div className="adm-scroll max-h-[260px] overflow-auto rounded-xl border border-slate-100">
+          <table className="w-full min-w-[520px] text-[12.5px]">
+            <thead className="sticky top-0 bg-slate-50 text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left">Date</th>
+                <th className="px-3 py-2 text-right">Cash</th>
+                <th className="px-3 py-2 text-right">UPI</th>
+                <th className="px-3 py-2 text-right">Card</th>
+                <th className="px-3 py-2 text-right">Coupon</th>
+                <th className="px-3 py-2 text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {by.days.map((d) => (
+                <tr key={d.date} className="border-t border-slate-100">
+                  <td className="whitespace-nowrap px-3 py-2 text-slate-700">
+                    {d2(d.date)} <span className="text-slate-400">· {d.bills}</span>
+                  </td>
+                  <td className="adm-num px-3 py-2 text-right">{rupee(d.cash)}</td>
+                  <td className="adm-num px-3 py-2 text-right">{rupee(d.upi)}</td>
+                  <td className="adm-num px-3 py-2 text-right">{rupee(d.card)}</td>
+                  <td className="adm-num px-3 py-2 text-right text-amber-700">{d.coupon ? `-${rupee(d.coupon)}` : "—"}</td>
+                  <td className="adm-num px-3 py-2 text-right font-bold text-slate-900">{rupee(d.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { rupee } from "@/lib/money";
-import { DEFAULT_CONFIG, TIER_KEYS, type AutoReward, type LoyaltyConfig, type Milestone, type Occasion, type TierKey } from "@/lib/loyalty/config";
+import { DEFAULT_CONFIG, MAX_TIERS, MESSAGE_FIELDS, MESSAGE_META, type AutoReward, type LoyaltyConfig, type Milestone, type Occasion, type Tier, type TierKey } from "@/lib/loyalty/config";
+import { fillMessage } from "@/lib/loyalty/messages";
 import { tierByKey } from "@/lib/loyalty/engine";
 import type { LoyaltyState } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
-import { Btn, Card, Field, Switch, cx, fmtDateTime, inputLineCls } from "../kit";
+import { Badge, Btn, Card, Field, Switch, cx, fmtDateTime, inputLineCls } from "../kit";
 import { Pager, usePaged } from "./shared";
+import { tierTone } from "./billing";
 
 const numIn = "h-10 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-[13.5px] text-slate-900 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
 
@@ -38,7 +40,7 @@ function Tiers({ value, onChange, cfg }: { value: TierKey[]; onChange: (v: TierK
       <button type="button" className={chip(!value.length)} onClick={() => onChange([])}>
         All tiers
       </button>
-      {TIER_KEYS.map((k) => (
+      {cfg.tiers.map((t) => t.key).map((k) => (
         <button key={k} type="button" className={chip(value.includes(k))} onClick={() => onChange(value.includes(k) ? value.filter((x) => x !== k) : [...value, k])}>
           {tierByKey(k, cfg).name}
         </button>
@@ -94,6 +96,8 @@ export default function SettingsTab({ d }: { d: LoyaltyState }) {
   const [c, setC] = useState<LoyaltyConfig>(d.config);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sec, setSec] = useState<"earn" | "redeem" | "tiers" | "auto" | "messages" | "segments" | "audit">("earn");
+  const show = (...x: (typeof sec)[]) => x.includes(sec);
   const dirty = JSON.stringify(c) !== JSON.stringify(d.config);
   const products = s.products.map((p) => ({ id: p.id, name: p.name }));
   const cats = [...new Set(s.products.map((p) => p.category).filter(Boolean))].sort().map((x) => ({ v: x, t: x }));
@@ -128,6 +132,44 @@ export default function SettingsTab({ d }: { d: LoyaltyState }) {
       </Card>
     );
   };
+  const setTier = (i: number, p: Partial<Tier>) => setC((x) => ({ ...x, tiers: x.tiers.map((y, j) => (j === i ? { ...y, ...p } : y)) }));
+  const addTier = () =>
+    setC((x) => {
+      const last = x.tiers[x.tiers.length - 1];
+      let n = x.tiers.length + 1;
+      while (x.tiers.some((y) => y.key === `tier${n}`)) n++;
+      return { ...x, tiers: [...x.tiers, { key: `tier${n}`, name: "New membership", min: last.min + 1000, multiplier: Math.round((last.multiplier + 0.25) * 100) / 100, benefits: "" }] };
+    });
+  const removeTier = async (i: number) => {
+    const tr = c.tiers[i];
+    if (!(await confirm({ title: `Remove ${tr.name}?`, body: "Members in it move to the nearest tier the next time they earn points. Rewards, campaigns or stamp rules limited to this tier stop matching it until you change them. Nothing is saved until you press Save.", ok: "Remove", danger: true }))) return;
+    setC((x) => ({ ...x, tiers: x.tiers.filter((_, j) => j !== i) }));
+  };
+  const SAMPLE: Record<string, string | number> = {
+    name: "Asha",
+    shop: s.settings.shopName,
+    date: new Date().toLocaleDateString("en-GB"),
+    points: 120,
+    balance: 860,
+    tier: c.tiers[Math.min(1, c.tiers.length - 1)]?.name ?? "",
+    benefits: c.tiers[Math.min(1, c.tiers.length - 1)]?.benefits ?? "",
+    code: "CK7H2P9Q",
+    wallet: `${(s.settings.publicUrl || "https://your-shop.example").replace(/\/$/, "")}/w/abc123`,
+    reason: "Goodwill for a late order",
+    reward: "Free chai",
+    ref: "RW4X9K",
+    expires: "30/04/2026",
+    status: "deactivated",
+  };
+  const SECS: [typeof sec, string][] = [
+    ["earn", "Earning & expiry"],
+    ["redeem", "Redeeming"],
+    ["tiers", "Memberships"],
+    ["auto", "Stamps, birthdays & referrals"],
+    ["messages", "WhatsApp messages"],
+    ["segments", "Customer segments"],
+    ["audit", "Audit log"],
+  ];
   const setMs = (i: number, m: Partial<Milestone>) => set("stamps", { milestones: c.stamps.milestones.map((x, j) => (j === i ? { ...x, ...m } : x)) });
 
   return (
@@ -148,7 +190,16 @@ export default function SettingsTab({ d }: { d: LoyaltyState }) {
         </div>
       </div>
 
+      <nav className="flex flex-wrap gap-1.5" aria-label="Loyalty settings sections">
+        {SECS.map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setSec(k)} aria-current={sec === k} className={cx("h-9 rounded-full border px-4 text-[12.5px] font-bold transition", sec === k ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400")}>
+            {label}
+          </button>
+        ))}
+      </nav>
+
       <div className="grid gap-5 xl:grid-cols-2">
+        {show("earn") && (
         <Card title="Earning points">
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -194,7 +245,9 @@ export default function SettingsTab({ d }: { d: LoyaltyState }) {
             </div>
           </div>
         </Card>
+        )}
 
+        {show("redeem") && (
         <Card title="Redeeming points">
           <div className="space-y-3">
             <Toggle label="Points redemption at billing" on={c.redeem.enabled} onChange={(v) => set("redeem", { enabled: v })} />
@@ -211,22 +264,47 @@ export default function SettingsTab({ d }: { d: LoyaltyState }) {
             <ListPicker label="Items points can't pay for" all={prods} value={c.redeem.excludedProductIds} onChange={(v) => set("redeem", { excludedProductIds: v })} />
           </div>
         </Card>
+        )}
 
-        <Card title="Membership tiers">
-          <p className="mb-3 text-[11.5px] text-slate-500">Based on lifetime points earned — redeeming never lowers a tier. Upgrades happen automatically.</p>
+        {show("tiers") && (
+        <Card
+          title="Membership tiers"
+          right={
+            <Btn size="sm" icon="plus" disabled={c.tiers.length >= MAX_TIERS} onClick={addTier}>
+              Add membership
+            </Btn>
+          }
+        >
+          <p className="mb-3 text-[11.5px] text-slate-500">
+            Based on lifetime points earned — redeeming never lowers a tier. Upgrades happen automatically. You can have up to {MAX_TIERS} memberships; they are ordered by points when saved.
+          </p>
+          <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-slate-500">
+            {[...c.tiers]
+              .sort((x, y) => x.min - y.min)
+              .map((tr, i, all) => (
+                <span key={tr.key} className="inline-flex items-center gap-1.5">
+                  <Badge tone={tierTone(tr.key)}>{tr.name || "—"}</Badge>
+                  <span>{i === 0 ? "from the start" : `${tr.min}+ pts`}</span>
+                  {i < all.length - 1 && <span className="text-slate-300">→</span>}
+                </span>
+              ))}
+          </div>
           <div className="space-y-3">
-            {c.tiers.map((t, i) => (
-              <div key={t.key} className="grid gap-2 rounded-xl border border-slate-100 p-3 sm:grid-cols-[1fr_110px_100px]">
-                <input className={numIn} value={t.name} maxLength={30} onChange={(e) => set("tiers", c.tiers.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) as never)} aria-label="Tier name" />
-                <input className={numIn} type="number" min={0} disabled={i === 0} value={t.min} onChange={(e) => set("tiers", c.tiers.map((x, j) => (j === i ? { ...x, min: Number(e.target.value) || 0 } : x)) as never)} aria-label="From lifetime points" title="From lifetime points" />
-                <input className={numIn} type="number" min={0} step={0.05} value={t.multiplier} onChange={(e) => set("tiers", c.tiers.map((x, j) => (j === i ? { ...x, multiplier: Number(e.target.value) || 0 } : x)) as never)} aria-label="Points multiplier" title="Points multiplier" />
-                <input className={cx(numIn, "sm:col-span-3")} value={t.benefits} maxLength={300} onChange={(e) => set("tiers", c.tiers.map((x, j) => (j === i ? { ...x, benefits: e.target.value } : x)) as never)} placeholder="Benefits shown to staff and the member" aria-label="Benefits" />
+            {c.tiers.map((tr, i) => (
+              <div key={tr.key} className="grid gap-2 rounded-xl border border-slate-100 p-3 sm:grid-cols-[1fr_110px_100px_auto]">
+                <input className={numIn} value={tr.name} maxLength={30} onChange={(e) => setTier(i, { name: e.target.value })} aria-label="Membership name" placeholder="Name" />
+                <input className={numIn} type="number" min={0} disabled={i === 0} value={tr.min} onChange={(e) => setTier(i, { min: Number(e.target.value) || 0 })} aria-label="From lifetime points" title="From lifetime points" />
+                <input className={numIn} type="number" min={0} step={0.05} value={tr.multiplier} onChange={(e) => setTier(i, { multiplier: Number(e.target.value) || 0 })} aria-label="Points multiplier" title="Points multiplier" />
+                <Btn kind="plain" icon="trash" disabled={c.tiers.length <= 1} onClick={() => removeTier(i)} aria-label={`Remove ${tr.name}`} />
+                <input className={cx(numIn, "sm:col-span-4")} value={tr.benefits} maxLength={300} onChange={(e) => setTier(i, { benefits: e.target.value })} placeholder="Benefits shown to staff and the member" aria-label="Benefits" />
               </div>
             ))}
             <p className="text-[11px] text-slate-400">Columns: name · from lifetime points · points multiplier.</p>
           </div>
         </Card>
+        )}
 
+        {show("earn") && (
         <Card title="Points expiry">
           <div className="grid gap-3 sm:grid-cols-2">
             <Num label="Points valid for (days)" value={c.expiry.days} onChange={(n) => set("expiry", { days: n })} hint="0 = never expire. Applies to points earned from now on." />
@@ -234,7 +312,9 @@ export default function SettingsTab({ d }: { d: LoyaltyState }) {
           </div>
           <p className="mt-3 text-[11.5px] text-slate-500">Oldest points are used first. Expired points are recorded in the ledger, never deleted.</p>
         </Card>
+        )}
 
+        {show("auto") && (
         <Card title="Visit stamps">
           <div className="space-y-3">
             <Toggle label="Digital stamp card" on={c.stamps.enabled} onChange={(v) => set("stamps", { enabled: v })} hint="Separate from points: one stamp per qualifying paid visit." />
@@ -264,7 +344,9 @@ export default function SettingsTab({ d }: { d: LoyaltyState }) {
             </Btn>
           </div>
         </Card>
+        )}
 
+        {show("auto") && (
         <Card title="Referrals">
           <div className="space-y-3">
             <Toggle label="Referral programme" on={c.referral.enabled} onChange={(v) => set("referral", { enabled: v })} hint="Rewards only after the new customer's first qualifying paid bill; reversed if that bill is voided." />
@@ -284,10 +366,49 @@ export default function SettingsTab({ d }: { d: LoyaltyState }) {
             <Tiers value={c.referral.tiers} onChange={(t) => set("referral", { tiers: t })} cfg={c} />
           </div>
         </Card>
+        )}
 
-        {occ("birthday", "Birthday")}
-        {occ("anniversary", "Anniversary")}
+        {show("auto") && occ("birthday", "Birthday")}
+        {show("auto") && occ("anniversary", "Anniversary")}
 
+        {show("messages") && (
+        <Card title="WhatsApp messages to members" className="xl:col-span-2">
+          <div className="space-y-4">
+            <Toggle
+              label="Offer a WhatsApp message after every loyalty update"
+              on={c.messages.enabled}
+              onChange={(v) => setC((x) => ({ ...x, messages: { ...x.messages, enabled: v } }))}
+              hint="After enrolling a member, a bill that earns or uses points, a tier upgrade, an adjustment, a reward or a status change, a window opens with the message ready — one tap sends it on WhatsApp."
+            />
+            <p className="text-[11.5px] leading-relaxed text-slate-500">
+              Words you can use, each filled in for the member (anything that doesn&apos;t apply is left out): <span className="font-mono text-slate-700">{MESSAGE_FIELDS.map((f) => `{${f}}`).join(" ")}</span>
+            </p>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {MESSAGE_META.map((m) => (
+                <div key={m.key} className="space-y-2 rounded-xl border border-slate-100 p-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <b className="text-[13.5px] text-slate-900">{m.label}</b>
+                    <span className="text-[11px] text-slate-400">{m.when}</span>
+                  </div>
+                  <textarea
+                    className={cx(inputLineCls, "h-24 resize-y py-2 text-[12.5px] leading-relaxed")}
+                    value={c.messages.templates[m.key]}
+                    maxLength={600}
+                    onChange={(e) => setC((x) => ({ ...x, messages: { ...x.messages, templates: { ...x.messages.templates, [m.key]: e.target.value } } }))}
+                    aria-label={`${m.label} message`}
+                  />
+                  <p className="whitespace-pre-wrap rounded-lg bg-emerald-50 px-3 py-2 text-[12px] text-slate-700">{fillMessage(c.messages.templates[m.key], SAMPLE)}</p>
+                  <button type="button" className="text-[11.5px] font-bold text-slate-500 hover:text-slate-900" onClick={() => setC((x) => ({ ...x, messages: { ...x.messages, templates: { ...x.messages.templates, [m.key]: DEFAULT_CONFIG.messages.templates[m.key] } } }))}>
+                    Reset wording
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+        )}
+
+        {show("segments") && (
         <Card title="Customer segments (CRM)">
           <div className="grid gap-3 sm:grid-cols-3">
             <Num label="“New” within (days)" value={c.crm.newDays} min={1} onChange={(n) => set("crm", { newDays: n })} />
@@ -301,6 +422,7 @@ export default function SettingsTab({ d }: { d: LoyaltyState }) {
             <Num label="“Lost” after (days)" value={c.crm.lostDays} min={1} onChange={(n) => set("crm", { lostDays: n })} />
           </div>
         </Card>
+        )}
       </div>
 
       <div className="flex justify-end">
@@ -314,7 +436,7 @@ export default function SettingsTab({ d }: { d: LoyaltyState }) {
         </Btn>
       </div>
 
-      <AuditLog d={d} />
+      {sec === "audit" && <AuditLog d={d} />}
     </div>
   );
 }

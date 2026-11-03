@@ -1,3 +1,4 @@
+import type { LoyaltyConfig } from "./loyalty/config";
 /* Shared shapes for the phone-number ordering system (server + client). */
 
 export type Product = {
@@ -9,6 +10,8 @@ export type Product = {
   stock: number | null;
   /** warn in admin when stock falls to this or below */
   lowAt: number;
+  /** loyalty points one unit earns; null = the shop-wide earn rule. Only the admin sets it. */
+  loyaltyPoints: number | null;
   description: string;
   image: string;
   eggless: boolean;
@@ -113,8 +116,12 @@ export type Bill = {
   createdAt: number;
 };
 
+/** Who a coupon is for: everyone, only customers who are not loyalty members, or only loyalty members. */
+export type CouponAudience = "all" | "regular" | "loyalty";
+
 export type Coupon = {
   id: string;
+  audience: CouponAudience;
   code: string;
   percent: number;
   minOrder: number;
@@ -142,6 +149,133 @@ export type Expense = {
   notes: string;
   /** YYYY-MM-DD */
   expenseDate: string;
+  createdAt: number;
+};
+
+export type ActivityRow = { id: string; actor: "admin" | "staff"; action: string; target: string; outcome: "done" | "requested"; createdAt: number };
+
+/** Plain-words names for what was done (anything not listed shows its code, tidied). */
+export const ACTIVITY_LABELS: Record<string, string> = {
+  "settings.update": "Changed shop settings",
+  "user.promote": "Made a staff user an admin",
+  "user.demote": "Made an admin a staff user",
+  "tab.clear": "Cleared a customer tab",
+  "session.update": "Edited a customer tab",
+  "order.create": "Created an order",
+  "order.status": "Changed an order's status",
+  "product.save": "Saved a product",
+  "product.delete": "Deleted a product",
+  "product.stock": "Changed a product's stock",
+  "product.toggle": "Switched a product on/off the menu",
+  "category.rename": "Renamed a category",
+  "category.add": "Added a category",
+  "category.delete": "Removed a category",
+  "ingredient.save": "Saved an ingredient",
+  "ingredient.delete": "Removed an ingredient",
+  "ingredient.purchase": "Bought ingredient stock",
+  "ingredient.waste": "Logged ingredient waste",
+  "ingredient.adjust": "Adjusted ingredient stock",
+  "recipe.save": "Saved a recipe",
+  "recipe.delete": "Removed a recipe",
+  "batch.save": "Logged a batch",
+  "coupon.save": "Saved a coupon",
+  "coupon.send": "Sent a coupon",
+  "coupon.delete": "Deleted a coupon",
+  "expense.save": "Saved an expense",
+  "expense.delete": "Deleted an expense",
+  "expcat.save": "Saved an expense category",
+  "expcat.delete": "Deleted an expense category",
+  "supplier.save": "Saved a supplier",
+  "supplier.delete": "Deleted a supplier",
+  "supplierinv.save": "Saved a supplier invoice",
+  "supplierinv.delete": "Deleted a supplier invoice",
+  "bill.create": "Created a bill",
+  "bill.edit": "Edited a bill's details",
+  "bill.delete": "Deleted a bill",
+  "bill.void": "Voided a bill",
+  "loyalty.register": "Enrolled a loyalty member",
+  "loyalty.update": "Edited a loyalty member",
+  "loyalty.status": "Changed a member's status",
+  "loyalty.adjust": "Adjusted loyalty points",
+  "loyalty.issueReward": "Issued a reward",
+  "loyalty.cancelVoucher": "Cancelled a reward voucher",
+  "loyalty.refund": "Refunded loyalty points",
+  "loyalty.grant": "Granted points / rewards",
+  "loyalty.maintain": "Ran loyalty housekeeping",
+  "loyalty.config": "Changed loyalty settings",
+  "loyalty.reward.save": "Saved a reward",
+  "loyalty.reward.delete": "Removed a reward",
+  "loyalty.campaign.save": "Saved a campaign",
+  "loyalty.campaign.delete": "Removed a campaign",
+  "approval.approve": "Approved a staff change",
+  "approval.reject": "Rejected a staff change",
+};
+
+/** What each approval-gated change reads as in a sentence: "<staff> wants to <verb> <name>". */
+export const APPROVAL_VERBS: Record<string, string> = {
+  "ingredient.save": "edit the ingredient",
+  "ingredient.delete": "remove the ingredient",
+  "product.save": "edit the product",
+  "bill.edit": "edit the details of bill",
+  "loyalty.update": "edit the loyalty member",
+  "loyalty.status": "change the loyalty status of",
+  "loyalty.adjust": "adjust loyalty points for",
+  "loyalty.reward.save": "edit the reward",
+  "loyalty.campaign.save": "edit the campaign",
+};
+
+/** A change staff asked for, waiting for (or decided by) the admin. */
+export type ApprovalRequest = {
+  id: string;
+  kind: string;
+  targetId: string;
+  targetName: string;
+  payload: Record<string, unknown>;
+  before: Record<string, unknown> | null;
+  requestedBy: string;
+  status: "pending" | "approved" | "rejected";
+  decidedBy: string;
+  createdAt: number;
+  decidedAt: number | null;
+};
+
+export type Supplier = {
+  id: string;
+  name: string;
+  contactPerson: string;
+  phone: string;
+  email: string;
+  gstin: string;
+  address: string;
+  supplies: string;
+  notes: string;
+  active: boolean;
+  createdAt: number;
+};
+
+export type SupplierInvoice = {
+  id: string;
+  supplierId: string;
+  invoiceNo: string;
+  /** YYYY-MM-DD */
+  invoiceDate: string;
+  /** price before GST */
+  price: number;
+  gstPercent: number;
+  gstAmount: number;
+  /** price + GST */
+  total: number;
+  paidAmount: number;
+  paymentMode: string;
+  /** YYYY-MM-DD or "" */
+  dueDate: string;
+  notes: string;
+  createdAt: number;
+};
+
+export type ProductCategory = {
+  id: string;
+  name: string;
   createdAt: number;
 };
 
@@ -178,7 +312,22 @@ export type StockMovement = {
 
 /* ---------------- Raw-ingredient inventory ---------------- */
 
-export type IngredientUnit = "g" | "ml";
+/** Each ingredient is counted in one unit of its own — stock, recipes and costs all use it as is. */
+export const INGREDIENT_UNITS = [
+  { key: "g", label: "Grams (g)" },
+  { key: "kg", label: "Kilograms (kg)" },
+  { key: "ml", label: "Millilitres (ml)" },
+  { key: "l", label: "Litres (l)" },
+  { key: "pcs", label: "Pieces (pcs)" },
+  { key: "dozen", label: "Dozen" },
+  { key: "pack", label: "Packs" },
+  { key: "tsp", label: "Teaspoons (tsp)" },
+  { key: "tbsp", label: "Tablespoons (tbsp)" },
+  { key: "cup", label: "Cups" },
+  { key: "oz", label: "Ounces (oz)" },
+  { key: "lb", label: "Pounds (lb)" },
+] as const;
+export type IngredientUnit = (typeof INGREDIENT_UNITS)[number]["key"];
 
 export type Ingredient = {
   id: string;
@@ -315,6 +464,10 @@ export type DB = {
   coupons: Coupon[];
   users: StaffUser[];
   expenses: Expense[];
+  suppliers: Supplier[];
+  categories: ProductCategory[];
+  approvals: ApprovalRequest[];
+  supplierInvoices: SupplierInvoice[];
   expenseCategories: ExpenseCategory[];
   ingredients: Ingredient[];
   batches: Batch[];
@@ -325,6 +478,8 @@ export type DB = {
 export type AdminState = Omit<DB, "settings" | "users"> & {
   settings: ShopDetails & { shopName: string; publicUrl: string; walkInsOnly: boolean; kotEnabled: boolean; orderingEnabled: boolean };
   users: PublicUser[];
+  /** how loyalty points are earned, so each item can show what it earns */
+  loyaltyEarn: Pick<LoyaltyConfig, "enabled" | "earn">;
 };
 
 /** A tab that closed in the last few minutes — "paid" once it was billed, "cleared"
@@ -365,4 +520,6 @@ export type TabView = {
 export type MenuItem = Pick<Product, "id" | "name" | "category" | "price" | "description" | "image" | "tags"> & {
   soldOut: boolean;
   left: number | null;
+  /** loyalty points one of this item earns (0 = none) */
+  points: number;
 };

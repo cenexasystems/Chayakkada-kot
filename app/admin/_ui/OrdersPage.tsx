@@ -3,14 +3,19 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { Bill } from "@/lib/types";
-import { payLabel, payParts, rupee } from "@/lib/money";
+import { payLabel, payParts, round2, rupee } from "@/lib/money";
 import { inRange, rangeOf, type Period } from "@/lib/analytics";
 import { useAdmin } from "./Store";
 import { billText, waLink } from "./receipt";
 import PrintModal from "./PrintModal";
-import { Badge, Btn, Empty, Icon, Modal, Page, PageHead, SearchBox, WaIcon, cx, downloadExcel, fmtDate, fmtDateTime, fmtTime } from "./kit";
+import { Badge, Btn, Empty, Field, Icon, Modal, Page, PageHead, SearchBox, WaIcon, cx, downloadExcel, fmtDate, fmtDateTime, fmtTime, inputCls } from "./kit";
 
 type DateF = Extract<Period, "today" | "week" | "month" | "custom"> | "any";
+type PayF = "all" | "cash" | "upi" | "card" | "split";
+
+/* A bill belongs to a payment filter when that method took part in it (a split bill shows
+   under every method it used, and under "Split" itself). */
+const payHit = (b: Bill, f: PayF) => f === "all" || (f === "split" ? b.payment === "split" : f === "cash" ? b.cashAmount > 0 : f === "upi" ? b.upiAmount > 0 : b.cardAmount > 0);
 
 
 const th = "px-3 py-4 text-left text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500 whitespace-nowrap";
@@ -27,7 +32,7 @@ function Chip({ on, children, onClick, tone = "red" }: { on: boolean; children: 
     <button
       type="button"
       onClick={onClick}
-      className={cx("h-8 whitespace-nowrap rounded-full px-4 text-[13px] font-semibold transition", on ? "bg-red-600 text-white shadow-[0_4px_10px_-4px_rgba(220,38,38,.9)]" : "bg-slate-100/80 text-slate-700 hover:bg-slate-200")}
+      className={cx("h-8 whitespace-nowrap rounded-full px-4 text-[13px] font-semibold transition", on ? "bg-red-600 text-white shadow-[0_4px_10px_-4px_rgba(107, 117, 80,.9)]" : "bg-slate-100/80 text-slate-700 hover:bg-slate-200")}
     >
       {children}
     </button>
@@ -35,12 +40,14 @@ function Chip({ on, children, onClick, tone = "red" }: { on: boolean; children: 
 }
 
 export default function OrdersPage() {
-  const { s, act, confirm } = useAdmin();
+  const { s, act, confirm, role } = useAdmin();
   const [type, setType] = useState<"all" | "tab" | "counter">("all");
   const [date, setDate] = useState<DateF>("any");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [q, setQ] = useState("");
+  const [pay, setPay] = useState<PayF>("all");
+  const [editing, setEditing] = useState<Bill | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 25;
   const [bill, setBill] = useState<Bill | null>(null);
@@ -60,18 +67,35 @@ export default function OrdersPage() {
   const range = date === "any" ? null : rangeOf(date, from, to);
   const needle = q.trim().toLowerCase();
 
-  const bills = useMemo(
+  /* everything except the payment filter — the boxes below are totals of this */
+  const base = useMemo(
     () =>
       s.bills
         .filter((b) => (type === "all" || b.source === type) && inRange(b.createdAt, range))
-        .filter((b) => !needle || `${b.invoiceNo} ${b.customerName} ${b.customerPhone} ${b.couponCode ?? ""} ${b.items.map((i) => i.name).join(" ")}`.toLowerCase().includes(needle))
-        .sort((a, b) => b.createdAt - a.createdAt),
+        .filter((b) => !needle || `${b.invoiceNo} ${b.customerName} ${b.customerPhone} ${b.couponCode ?? ""} ${b.items.map((i) => i.name).join(" ")}`.toLowerCase().includes(needle)),
     [s.bills, type, range, needle],
   );
+  const bills = useMemo(() => base.filter((b) => payHit(b, pay)).sort((a, b) => b.createdAt - a.createdAt), [base, pay]);
+
+  /* money collected per payment method, from the completed bills in the date / type / search filters */
+  const boxes = useMemo(() => {
+    const done = base.filter((b) => b.status === "completed");
+    const of = (f: PayF, amt: (b: Bill) => number) => {
+      const hit = done.filter((b) => payHit(b, f));
+      return { amount: round2(hit.reduce((n, b) => n + amt(b), 0)), count: hit.length };
+    };
+    return {
+      all: { amount: round2(done.reduce((n, b) => n + b.total, 0)), count: done.length },
+      cash: of("cash", (b) => b.cashAmount),
+      upi: of("upi", (b) => b.upiAmount),
+      card: of("card", (b) => b.cardAmount),
+      split: of("split", (b) => b.total),
+    };
+  }, [base]);
 
   /* Any filter change starts the list again from page 1 (otherwise an invisible
      page number carries over to a shorter result set). */
-  useEffect(() => { setPage(1); }, [type, date, from, to, needle]);
+  useEffect(() => { setPage(1); }, [type, date, from, to, needle, pay]);
 
   /* The bills on screen as an Excel workbook with real columns. */
   const exportRows = (): (string | number)[][] => [
@@ -92,11 +116,42 @@ export default function OrdersPage() {
       <PageHead
         title="Order Management"
         right={
-          <Link href="/admin/billing" className="inline-flex h-11 items-center gap-2 rounded-xl bg-red-600 px-5 text-[14px] font-bold text-white shadow-[0_6px_16px_-8px_rgba(220,38,38,.8)] hover:bg-red-700">
+          <Link href="/admin/billing" className="inline-flex h-11 items-center gap-2 rounded-xl bg-red-600 px-5 text-[14px] font-bold text-white shadow-[0_6px_16px_-8px_rgba(107, 117, 80,.8)] hover:bg-red-700">
             <Icon name="cart" size={18} /> Open POS
           </Link>
         }
       />
+
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+        {(
+          [
+            ["all", "All payments", "Total billed", "bg-slate-100 text-slate-600"],
+            ["cash", "Cash", "Collected in cash", "bg-emerald-50 text-emerald-600"],
+            ["upi", "UPI / GPay / QR", "Collected by UPI", "bg-violet-50 text-violet-600"],
+            ["card", "Card", "Collected by card", "bg-sky-50 text-sky-600"],
+            ["split", "Split bills", "Paid with 2+ methods", "bg-amber-50 text-amber-600"],
+          ] as const
+        ).map(([k, label, hint, tone]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setPay(pay === k ? "all" : k)}
+            aria-pressed={pay === k}
+            className={cx("min-w-0 rounded-2xl border bg-white p-4 text-left shadow-[0_2px_10px_-2px_rgba(15,23,42,.08)] transition hover:border-slate-300 active:scale-[.99]", pay === k ? "border-red-300 ring-2 ring-red-100" : "border-slate-100")}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">{label}</span>
+              <span className={cx("grid h-7 w-7 shrink-0 place-items-center rounded-full", tone)}>
+                <Icon name="rupee" size={14} stroke={2.4} />
+              </span>
+            </div>
+            <div className="adm-num mt-2 truncate text-[22px] font-extrabold text-slate-900">{rupee(boxes[k].amount)}</div>
+            <p className="mt-1 truncate text-[11px] text-slate-400">
+              {boxes[k].count} bill{boxes[k].count === 1 ? "" : "s"} · {hint}
+            </p>
+          </button>
+        ))}
+      </div>
 
       <div className="mb-5 flex flex-col gap-4 rounded-2xl border border-slate-100 p-5 shadow-[0_2px_10px_-2px_rgba(15,23,42,.08)] lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-3">
@@ -110,6 +165,22 @@ export default function OrdersPage() {
               ] as const
             ).map(([v, t]) => (
               <Chip key={v} on={type === v} onClick={() => setType(v)}>
+                {t}
+              </Chip>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-14 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Paid by</span>
+            {(
+              [
+                ["all", "All"],
+                ["cash", "Cash"],
+                ["upi", "UPI"],
+                ["card", "Card"],
+                ["split", "Split"],
+              ] as const
+            ).map(([v, t]) => (
+              <Chip key={v} on={pay === v} onClick={() => setPay(v)}>
                 {t}
               </Chip>
             ))}
@@ -196,12 +267,17 @@ export default function OrdersPage() {
                         <button type="button" title="View details" aria-label="View details" onClick={() => setBill(b)} className="grid h-9 w-9 place-items-center rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200">
                           <Icon name="eye" size={16} />
                         </button>
+                        <button type="button" title="Edit details" aria-label="Edit details" onClick={() => setEditing(b)} className="grid h-9 w-9 place-items-center rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200">
+                          <Icon name="edit" size={16} />
+                        </button>
                         <button type="button" title="Print receipt" aria-label="Print receipt" onClick={() => setPrintFor(b)} className="grid h-9 w-9 place-items-center rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200">
                           <Icon name="print" size={16} />
                         </button>
-                        <button type="button" title="Delete bill" aria-label="Delete bill" onClick={() => remove(b)} className="grid h-9 w-9 place-items-center rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
-                          <Icon name="trash" size={16} />
-                        </button>
+                        {role === "admin" && (
+                          <button type="button" title="Delete bill" aria-label="Delete bill" onClick={() => remove(b)} className="grid h-9 w-9 place-items-center rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
+                            <Icon name="trash" size={16} />
+                          </button>
+                        )}
                       </span>
                     </td>
                   </tr>
@@ -229,6 +305,17 @@ export default function OrdersPage() {
       )}
 
       <PrintModal bill={printFor} onClose={() => setPrintFor(null)} />
+      {editing && (
+        <EditBill
+          key={editing.id}
+          b={editing}
+          admin={role === "admin"}
+          onClose={() => setEditing(null)}
+          onSaved={(nb) => {
+            if (bill?.id === nb.id) setBill(nb);
+          }}
+        />
+      )}
 
       {/* ---------- bill detail ---------- */}
       <Modal
@@ -260,6 +347,9 @@ export default function OrdersPage() {
               <a href={`/invoice/${bill.id}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-10 items-center rounded-xl border border-slate-200 px-4 text-[13px] font-semibold text-slate-700 hover:bg-slate-50">
                 View invoice
               </a>
+              <Btn icon="edit" onClick={() => setEditing(bill)}>
+                Edit details
+              </Btn>
               <Btn kind="dark" icon="print" onClick={() => setPrintFor(bill)}>
                 Print
               </Btn>
@@ -367,5 +457,83 @@ export default function OrdersPage() {
         )}
       </Modal>
     </Page>
+  );
+}
+
+/* Fix a bill's customer details or how it was paid. The items and amounts stay as they were
+   (void the bill and bill again to change those). Staff edits go to the admin to approve. */
+function EditBill({ b, admin, onClose, onSaved }: { b: Bill; admin: boolean; onClose: () => void; onSaved: (b: Bill) => void }) {
+  const { act, toast } = useAdmin();
+  const [f, setF] = useState({ customerName: b.customerName, customerPhone: b.customerPhone, payment: b.payment as string, cashAmount: b.cashAmount ? String(b.cashAmount) : "", upiAmount: b.upiAmount ? String(b.upiAmount) : "", cardAmount: b.cardAmount ? String(b.cardAmount) : "" });
+  const [busy, setBusy] = useState(false);
+  const locked = !!b.loyaltyCustomerId || b.pointsEarned > 0 || b.pointsRedeemed > 0;
+  const split = f.payment === "split";
+  const sum = round2((Number(f.cashAmount) || 0) + (Number(f.upiAmount) || 0) + (Number(f.cardAmount) || 0));
+  const splitBad = split && Math.abs(sum - b.total) > 0.01;
+  const save = async () => {
+    setBusy(true);
+    const r = await act<Bill>("bill.edit", { id: b.id, ...f });
+    setBusy(false);
+    if (r.ok) {
+      if (!r.pending) {
+        toast({ kind: "ok", title: `${b.invoiceNo} updated` });
+        onSaved(r.result);
+      }
+      onClose();
+    }
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Edit details · ${b.invoiceNo}`}
+      footer={
+        <>
+          <Btn onClick={onClose}>Cancel</Btn>
+          <Btn kind="dark" disabled={busy || splitBad} onClick={save}>
+            {busy ? "Saving…" : admin ? "Save changes" : "Send for approval"}
+          </Btn>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {!admin && <p className="rounded-xl bg-amber-50 px-4 py-2.5 text-[12.5px] font-semibold text-amber-800">Your changes go to the admin, and apply only once they approve.</p>}
+        <Field label="Customer name">
+          <input className={inputCls} value={f.customerName} maxLength={80} onChange={(e) => setF({ ...f, customerName: e.target.value })} />
+        </Field>
+        <Field label="Mobile" hint={locked ? "This bill earned or used loyalty points, so the mobile is fixed." : undefined}>
+          <input className={inputCls} inputMode="numeric" disabled={locked} value={f.customerPhone} maxLength={14} onChange={(e) => setF({ ...f, customerPhone: e.target.value.replace(/[^\d+ ]/g, "") })} />
+        </Field>
+        <Field label={`Paid by · bill total ${rupee(b.total)}`} hint={b.status !== "completed" ? "A voided bill's payment can't be changed." : undefined}>
+          <select className={inputCls} disabled={b.status !== "completed"} value={f.payment} onChange={(e) => setF({ ...f, payment: e.target.value })}>
+            <option value="cash">Cash</option>
+            <option value="upi">UPI / GPay / QR</option>
+            <option value="card">Card</option>
+            <option value="split">Split (two or more)</option>
+          </select>
+        </Field>
+        {split && (
+          <div className="space-y-2">
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  ["cashAmount", "Cash"],
+                  ["upiAmount", "UPI"],
+                  ["cardAmount", "Card"],
+                ] as const
+              ).map(([k, label]) => (
+                <Field key={k} label={label}>
+                  <input className={inputCls} type="number" min={0} step="0.01" inputMode="decimal" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+                </Field>
+              ))}
+            </div>
+            <p className={cx("text-[12px] font-semibold", splitBad ? "text-red-600" : "text-emerald-700")}>
+              {rupee(sum)} of {rupee(b.total)}
+              {splitBad ? ` — ${rupee(Math.abs(round2(b.total - sum)))} ${sum < b.total ? "short" : "over"}` : " — adds up"}
+            </p>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }
