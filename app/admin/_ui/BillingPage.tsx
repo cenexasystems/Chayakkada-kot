@@ -336,14 +336,14 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
             </div>
             <div className="space-y-2 rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
               {lines.map((l) => (
-                <div key={l.key} className="flex flex-wrap items-center gap-2 border-b border-slate-200/70 pb-2 last:border-0 last:pb-0">
+                <div key={l.key} className="flex flex-wrap items-center gap-2 border-b border-slate-200/70 pb-2 last:border-0 last:pb-0 sm:flex-nowrap">
                   <input
-                    className="h-10 min-w-[180px] flex-1 rounded-xl border border-slate-300 bg-white px-3 text-[14px] outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                    className="h-10 min-w-[180px] flex-1 rounded-xl border border-slate-300 bg-white px-3 text-[14px] outline-none transition placeholder:text-slate-400 sm:min-w-0 focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
                     placeholder="Item name / description…"
                     value={l.name}
                     onChange={(e) => setLine(l.key, { name: e.target.value })}
                   />
-                  <button type="button" onClick={() => setPicker(l.key)} className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-bold text-slate-700 transition hover:bg-slate-100">
+                  <button type="button" onClick={() => setPicker(l.key)} className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-bold text-slate-700 transition hover:bg-slate-100">
                     <Icon name="list" size={15} /> Catalog
                   </button>
                   <input
@@ -351,13 +351,13 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
                     min={0}
                     step="0.5"
                     inputMode="decimal"
-                    className="h-10 w-24 rounded-xl border border-slate-300 bg-white px-3 text-[14px] outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
+                    className="h-10 w-24 shrink-0 rounded-xl border border-slate-300 bg-white px-3 text-[14px] outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
                     placeholder="₹ Price"
                     value={l.price}
                     onChange={(e) => setLine(l.key, { price: e.target.value })}
                     aria-label="Price"
                   />
-                  <div className="flex h-10 w-[112px] items-center overflow-hidden rounded-xl border border-slate-300 bg-white">
+                  <div className="flex h-10 w-[112px] shrink-0 items-center overflow-hidden rounded-xl border border-slate-300 bg-white">
                     <button type="button" className="h-full w-8 text-[16px] font-bold text-slate-700 hover:bg-slate-50" onClick={() => setLine(l.key, { qty: Math.max(1, l.qty - 1) })} aria-label="Less">
                       −
                     </button>
@@ -379,7 +379,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
                   <button
                     type="button"
                     onClick={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [blank()]))}
-                    className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
                     aria-label="Remove item"
                   >
                     <Icon name="trash" size={16} />
