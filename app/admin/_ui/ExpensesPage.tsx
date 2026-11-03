@@ -36,7 +36,13 @@ export default function ExpensesPage() {
   const range = useMemo(() => rangeOf(period, from, to), [period, from, to]);
   const st = useMemo(() => expenseStats(s.expenses, range, cat, q), [s.expenses, range, cat, q]);
   /* Any filter change restarts the list at page 1. */
-  useEffect(() => { setPage(1); }, [period, from, to, cat, q]);
+  // a new filter starts the list again from page 1
+  const pageKey = JSON.stringify([period, from, to, cat, q]);
+  const [seenKey, setSeenKey] = useState(pageKey);
+  if (seenKey !== pageKey) {
+    setSeenKey(pageKey);
+    setPage(1);
+  }
   const pages = Math.max(1, Math.ceil(st.rows.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
   const slice = st.rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);

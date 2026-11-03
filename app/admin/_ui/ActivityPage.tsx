@@ -49,7 +49,13 @@ export default function ActivityPage() {
     const n = q.trim().toLowerCase();
     return (rows ?? []).filter((r) => (who === "all" || r.actor === who) && inRange(r.createdAt, range) && (!n || `${label(r.action)} ${r.target} ${r.action}`.toLowerCase().includes(n)));
   }, [rows, who, range, q]);
-  useEffect(() => setPage(1), [who, period, from, to, q]);
+  // a new filter starts the list again from page 1
+  const pageKey = JSON.stringify([who, period, from, to, q]);
+  const [seenKey, setSeenKey] = useState(pageKey);
+  if (seenKey !== pageKey) {
+    setSeenKey(pageKey);
+    setPage(1);
+  }
   const pages = Math.max(1, Math.ceil(list.length / PAGE));
   const safe = Math.min(page, pages);
   const slice = list.slice((safe - 1) * PAGE, safe * PAGE);

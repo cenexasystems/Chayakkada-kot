@@ -158,7 +158,7 @@ function Settings({ onClose }: { onClose: () => void }) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <b className="block text-[13.5px] text-slate-900">Kitchen queue (KOT)</b>
-            <p className="mt-0.5 text-[12.5px] text-slate-500">On-screen kitchen tickets for the chef. Turn off if the kitchen doesn't need a queue.</p>
+            <p className="mt-0.5 text-[12.5px] text-slate-500">On-screen kitchen tickets for the chef. Turn off if the kitchen doesn&apos;t need a queue.</p>
           </div>
           <Switch on={kotEnabled} onChange={toggleKot} label="Kitchen queue" />
         </div>
@@ -176,6 +176,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [rail, setRail] = useState(false); // desktop sidebar collapsed to icons
   useEffect(() => {
     try {
+      // read after load so the server and browser render the same HTML
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRail(localStorage.getItem("adm-rail") === "1");
     } catch {}
   }, []);

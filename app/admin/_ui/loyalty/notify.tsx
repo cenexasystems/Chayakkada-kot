@@ -6,7 +6,7 @@
    Settings → WhatsApp messages, and lets staff tweak it before sending. A browser can't send
    WhatsApp by itself, so one tap opens the chat with the message ready. */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { shopToday } from "@/lib/money";
 import { DEFAULT_CONFIG, type MessageKey } from "@/lib/loyalty/config";
 import { tierByKey } from "@/lib/loyalty/engine";
@@ -30,7 +30,7 @@ export type MemberNotice = {
 export function MemberUpdate({ phone, name, kind, vars, tierBefore, onClose }: MemberNotice & { onClose: () => void }) {
   const { s } = useAdmin();
   const [lk, setLk] = useState<LoyaltyLookup | null | undefined>(undefined);
-  const [text, setText] = useState<string | null>(null);
+  const [edited, setEdited] = useState<string | null>(null); // what staff typed over the ready-made message
 
   useEffect(() => {
     let live = true;
@@ -47,27 +47,27 @@ export function MemberUpdate({ phone, name, kind, vars, tierBefore, onClose }: M
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [off]);
 
-  useEffect(() => {
-    if (lk === undefined || off || text !== null) return;
+  // the ready-made message, once the member's live balance and tier are known
+  const made = useMemo(() => {
+    if (lk === undefined || off) return null;
     const c = lk?.customer;
     const tier = c ? tierByKey(c.tier, cfg) : null;
     const k: MessageKey = kind === "earned" && tierBefore && c && c.tier !== tierBefore ? "tier" : kind;
     const [y, m, d] = shopToday().split("-").map(Number);
     const base = (s.settings.publicUrl || (typeof window !== "undefined" ? window.location.origin : "")).replace(/\/$/, "");
-    setText(
-      fillMessage(cfg.messages.templates[k], {
-        name: (c?.name ?? name).split(" ")[0],
-        shop: s.settings.shopName,
-        date: `${d}/${m}/${y}`,
-        balance: c?.available,
-        tier: tier?.name,
-        benefits: tier?.benefits,
-        code: c?.code,
-        wallet: c ? `${base}/w/${c.walletToken}` : "",
-        ...vars,
-      }),
-    );
-  }, [lk, off, text, kind, tierBefore, cfg, name, vars, s.settings.publicUrl, s.settings.shopName]);
+    return fillMessage(cfg.messages.templates[k], {
+      name: (c?.name ?? name).split(" ")[0],
+      shop: s.settings.shopName,
+      date: `${d}/${m}/${y}`,
+      balance: c?.available,
+      tier: tier?.name,
+      benefits: tier?.benefits,
+      code: c?.code,
+      wallet: c ? `${base}/w/${c.walletToken}` : "",
+      ...vars,
+    });
+  }, [lk, off, kind, tierBefore, cfg, name, vars, s.settings.publicUrl, s.settings.shopName]);
+  const text = edited ?? made;
 
   if (off) return null;
   return (
@@ -77,7 +77,7 @@ export function MemberUpdate({ phone, name, kind, vars, tierBefore, onClose }: M
       ) : (
         <div className="space-y-3">
           <Field label="Message" hint="Edit it if you like — the wording itself is set in Loyalty → Settings → WhatsApp messages.">
-            <textarea className={cx(inputLineCls, "h-32 resize-y py-2.5 leading-relaxed")} value={text} maxLength={1000} onChange={(e) => setText(e.target.value)} />
+            <textarea className={cx(inputLineCls, "h-32 resize-y py-2.5 leading-relaxed")} value={text} maxLength={1000} onChange={(e) => setEdited(e.target.value)} />
           </Field>
           <a href={waLink(phone, text)} target="_blank" rel="noopener noreferrer" className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#22c55e] px-5 text-[14px] font-bold text-white hover:bg-[#16a34a]">
             <WaIcon size={18} /> Send on WhatsApp

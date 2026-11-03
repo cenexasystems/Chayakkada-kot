@@ -1,14 +1,14 @@
 import { and, asc, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm";
 import { ApiError, mutate, read } from "./store";
 import { code, uid } from "./seed";
-import { checkCoupon, computeBill, round2, shopToday } from "./money";
+import { TZ, checkCoupon, computeBill, round2, shopToday } from "./money";
 import { hashPassword } from "./auth";
 import { db, type Db, type Tx } from "./db";
 import { batches, bills, coupons, expenseCategories, expenses, ingredientMoves, ingredients, meta, orders, products, recipes, sessions, settings, staffUsers, stockMovements, supplierInvoices, suppliers, approvalRequests, activityLog, loyaltyCustomers, loyaltyRewards, loyaltyCampaigns, productCategories } from "./db/schema";
 import * as L from "./loyalty/server";
 import { pointsPerUnit } from "./loyalty/engine";
 import type { LoyaltyConfig } from "./loyalty/config";
-import { INGREDIENT_UNITS, type AdminState, Bill, Ingredient, IngredientLedger, IngredientMove, IngredientMoveType, IngredientUnit, StockLedger, MenuItem, Order, OrderItem, OrderStatus, PayMethod, Product, PublicUser, Recipe, RecipeItem, Session, StaffUser, StockMoveType, TabClose, TabView, ShopDetails } from "./types";
+import { INGREDIENT_UNITS, type AdminState, type Coupon, Bill, Ingredient, IngredientLedger, IngredientMove, IngredientMoveType, IngredientUnit, StockLedger, MenuItem, Order, OrderItem, OrderStatus, PayMethod, Product, PublicUser, Recipe, RecipeItem, Session, StaffUser, StockMoveType, TabClose, TabView, ShopDetails } from "./types";
 
 /* Every read/write the app makes, with validation. Route handlers are thin wrappers.
    Writes run inside store.mutate(), which serializes them and rolls back on error. */
@@ -878,7 +878,7 @@ async function describeTarget(tx: Tx, op: string, id: string): Promise<{ name: s
     }
     case "bill.edit": {
       const r = await must(tx.select().from(bills).where(eq(bills.id, id)), "Bill");
-      return { name: r.invoiceNo, before: plain(r) };
+      return { name: r.invoiceNo, before: { ...plain(r), items: r.items } };
     }
     case "loyalty.reward.save": {
       const r = await must(tx.select().from(loyaltyRewards).where(eq(loyaltyRewards.id, id)), "Reward");
@@ -895,10 +895,19 @@ async function describeTarget(tx: Tx, op: string, id: string): Promise<{ name: s
   }
 }
 
-/** What a "bill.edit" changes on a bill — the customer's details and how it was paid. Items and
-    amounts stay as they are (void the bill and bill again to change those). Throws if the edit isn't allowed. */
-function billEditPatch(b: Bill, a: Args) {
+/** The time of day of a moment in the shop's timezone, as HH:MM:SS. */
+const shopClock = (at: number) => new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(at);
+
+/** What a "bill.edit" changes on a bill: who it was for, its date, its items and charges (totals are
+    worked out again), and how it was paid. Returns the changes plus the stock to put back or take
+    out for items whose quantity changed. Items and amounts of a bill that earned or used loyalty
+    points can't be edited — void it and bill again — and nothing on a voided bill's amounts can.
+    Throws if the edit isn't allowed. */
+export function billEditPatch(b: Bill, a: Args) {
   const patch: Partial<typeof bills.$inferInsert> = {};
+  const deltas = new Map<string, number>();
+  const loyaltyLocked = !!b.loyaltyCustomerId || b.pointsEarned > 0 || b.pointsRedeemed > 0 || b.rewardDiscount > 0 || b.pointsDiscount > 0;
+
   if (a.customerName !== undefined) {
     const n = str(a.customerName, 80);
     if (n !== b.customerName) patch.customerName = n;
@@ -907,43 +916,111 @@ function billEditPatch(b: Bill, a: Args) {
     const ph = mobile(a.customerPhone);
     if (ph === null) throw new ApiError("Customer mobile should be a 10-digit number.");
     if (ph !== b.customerPhone) {
-      if (b.loyaltyCustomerId || b.pointsEarned > 0 || b.pointsRedeemed > 0) throw new ApiError("This bill earned or used loyalty points for its customer, so the mobile can't be changed. Void it and bill again instead.");
+      if (loyaltyLocked) throw new ApiError("This bill earned or used loyalty points for its customer, so the mobile can't be changed. Void it and bill again instead.");
       patch.customerPhone = ph;
     }
   }
-  if (a.payment !== undefined) {
-    const pay: PayMethod = a.payment === "upi" || a.payment === "card" || a.payment === "split" ? a.payment : "cash";
-    const total = b.total;
+  if (a.invoiceDate !== undefined) {
+    const d = str(a.invoiceDate, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new ApiError("Pick a valid invoice date.");
+    if (d > shopToday()) throw new ApiError("The invoice date can't be in the future.");
+    if (d !== shopToday(b.createdAt)) {
+      if (loyaltyLocked) throw new ApiError("This bill earned or used loyalty points, so its date can't be changed.");
+      const ts = Date.parse(`${d}T${shopClock(b.createdAt)}+05:30`);
+      if (!Number.isFinite(ts)) throw new ApiError("Pick a valid invoice date.");
+      patch.createdAt = ts;
+    }
+  }
+
+  // ---- items, discount, charges and GST: totals are worked out again ----
+  let total = b.total;
+  if (a.items !== undefined) {
+    if (!Array.isArray(a.items)) throw new ApiError("Add at least one item to the invoice.");
+    const items: OrderItem[] = [];
+    for (const raw of a.items as Record<string, unknown>[]) {
+      const name = str(raw?.name, 120);
+      const price = round2(num(raw?.price));
+      const qty = Math.floor(num(raw?.qty));
+      if (!name) throw new ApiError("Every item needs a name.");
+      if (!(price >= 0)) throw new ApiError(`Enter a price for "${name}".`);
+      if (!(qty >= 1 && qty <= 999)) throw new ApiError(`Check the quantity for "${name}".`);
+      const pid = str(raw?.productId, 40);
+      items.push({ productId: pid || null, name, price, qty });
+    }
+    if (!items.length) throw new ApiError("Add at least one item to the invoice.");
+    const manualType: "amount" | "percent" = a.manualType === "percent" ? "percent" : "amount";
+    const manualValue = Math.max(0, num(a.manualValue) || 0);
+    const extra = Math.max(0, round2(num(a.extra) || 0));
+    const isGst = a.isGst === true;
+    const gstRaw = num(a.gstPercent);
+    if (isGst && !(gstRaw >= 0 && gstRaw <= 100)) throw new ApiError("GST should be between 0 and 100%.");
+    const same =
+      items.length === b.items.length &&
+      items.every((i, k) => i.name === b.items[k].name && i.price === b.items[k].price && i.qty === b.items[k].qty && (i.productId ?? null) === (b.items[k].productId ?? null)) &&
+      manualType === b.manualType && manualValue === b.manualValue && extra === b.extra && isGst === b.isGst && (!isGst || round2(gstRaw) === b.gstPercent);
+    if (!same) {
+      if (b.status !== "completed") throw new ApiError("A voided bill's items and amounts can't be changed.");
+      if (loyaltyLocked) throw new ApiError("This bill earned or used loyalty points, so its items and amounts can't be edited. Void it and bill again instead.");
+      // the coupon on the bill stays, at the same percent, on the new subtotal
+      const coupon: Coupon | null = b.couponCode ? { id: "", audience: "all", code: b.couponCode, percent: b.couponPercent, minOrder: 0, expiresAt: null, limit: null, used: 0, active: true, restricted: false, phones: [], sent: 0, createdAt: 0 } : null;
+      const c = computeBill({ items, coupon, manualType, manualValue, extra, gst: isGst, gstPercent: isGst ? gstRaw : 0 });
+      Object.assign(patch, {
+        items,
+        itemCount: c.itemCount,
+        subtotal: c.subtotal,
+        couponDiscount: c.couponDiscount,
+        manualType,
+        manualValue,
+        manualDiscount: c.manualDiscount,
+        discount: c.discount,
+        extra: c.extra,
+        isGst,
+        gstPercent: c.gstPercent,
+        taxableAmount: c.taxable,
+        gstAmount: c.gstAmount,
+        total: c.total,
+      });
+      total = c.total;
+      // stock: whatever the old items put back and the new items take out, net per product
+      for (const [k, v] of tally(b.items, 1)) deltas.set(k, (deltas.get(k) ?? 0) + v);
+      for (const [k, v] of tally(items, -1)) deltas.set(k, (deltas.get(k) ?? 0) + v);
+    }
+  }
+
+  // ---- how it was paid (and re-split when the total moved) ----
+  const totalChanged = total !== b.total;
+  if (a.payment !== undefined || totalChanged) {
+    const pay: PayMethod = a.payment === undefined ? b.payment : a.payment === "upi" || a.payment === "card" || a.payment === "split" ? a.payment : "cash";
     let cash = pay === "cash" ? total : 0;
     let upi = pay === "upi" ? total : 0;
     let card = pay === "card" ? total : 0;
     if (pay === "split") {
-      cash = round2(Math.max(0, num(a.cashAmount)));
-      upi = round2(Math.max(0, num(a.upiAmount)));
-      card = round2(Math.max(0, num(a.cardAmount)));
+      cash = round2(Math.max(0, num(a.cashAmount) || 0));
+      upi = round2(Math.max(0, num(a.upiAmount) || 0));
+      card = round2(Math.max(0, num(a.cardAmount) || 0));
       if (Math.abs(cash + upi + card - total) > 0.01) throw new ApiError(`The split amounts must add up to the bill total (${total}).`);
       if ([cash, upi, card].filter((n) => n > 0).length < 2) throw new ApiError("A split bill needs two or more payment methods.");
     }
-    if (pay !== b.payment || cash !== b.cashAmount || upi !== b.upiAmount || card !== b.cardAmount) {
+    if (pay !== b.payment || totalChanged || cash !== b.cashAmount || upi !== b.upiAmount || card !== b.cardAmount) {
       if (b.status !== "completed") throw new ApiError("A voided bill's payment can't be changed.");
       patch.payment = pay;
       patch.cashAmount = cash;
       patch.upiAmount = upi;
       patch.cardAmount = card;
-      if (pay !== b.payment) {
+      if (pay !== b.payment || totalChanged) {
         patch.received = total;
         patch.change = 0;
       }
     }
   }
-  return patch;
+  return { patch, deltas };
 }
 
 async function requestApproval(tx: Tx, op: string, a: Args, role: string, now: number) {
   const id = str(a.id, 40);
   const { name, before } = await describeTarget(tx, op, id);
   if (op === "ingredient.save" && !str(a.name, 80)) throw new ApiError("Give the ingredient a name.");
-  if (op === "bill.edit") billEditPatch(before as unknown as Bill, a); // refuse a bad edit now, not when the admin gets to it
+  if (op === "bill.edit") billEditPatch(await must(tx.select().from(bills).where(eq(bills.id, id)), "Bill"), a); // refuse a bad edit now, not when the admin gets to it
   const payload: Record<string, unknown> = Object.fromEntries(Object.entries(a).filter(([k]) => k !== "op"));
   if (op === "product.save") delete payload.loyaltyPoints; // points per item is the admin's call alone
   // asking again about the same thing replaces the earlier ask — except points adjustments, which each count
@@ -968,9 +1045,15 @@ async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<unknown
     switch (op) {
       case "bill.edit": {
         const b = await must(tx.select().from(bills).where(eq(bills.id, id)), "Bill");
-        const patch = billEditPatch(b, a);
+        const { patch, deltas } = billEditPatch(b, a);
         if (!Object.keys(patch).length) return b;
         const [x] = await tx.update(bills).set(patch).where(eq(bills.id, id)).returning();
+        if (deltas.size) {
+          const out = new Map([...deltas].filter(([, d]) => d < 0));
+          const back = new Map([...deltas].filter(([, d]) => d > 0));
+          await moveStock(tx, out, { type: "sale", ref: b.invoiceNo, note: "Bill edited — more sold" }, now);
+          await moveStock(tx, back, { type: "adjustment", ref: b.invoiceNo, note: "Bill edited — fewer sold" }, now);
+        }
         return x;
       }
       case "approval.approve":

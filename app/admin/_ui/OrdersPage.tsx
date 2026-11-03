@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import type { Bill } from "@/lib/types";
-import { payLabel, payParts, round2, rupee } from "@/lib/money";
+import type { Bill, Coupon } from "@/lib/types";
+import { computeBill, payLabel, payParts, round2, rupee, shopToday } from "@/lib/money";
 import { inRange, rangeOf, type Period } from "@/lib/analytics";
 import { useAdmin } from "./Store";
 import { billText, waLink } from "./receipt";
 import PrintModal from "./PrintModal";
-import { Badge, Btn, Empty, Field, Icon, Modal, Page, PageHead, SearchBox, WaIcon, cx, downloadExcel, fmtDate, fmtDateTime, fmtTime, inputCls } from "./kit";
+import { Badge, Btn, Empty, Field, Icon, Modal, Page, PageHead, SearchBox, Switch, WaIcon, cx, downloadExcel, fmtDate, fmtDateTime, fmtTime, inputCls } from "./kit";
 
 type DateF = Extract<Period, "today" | "week" | "month" | "custom"> | "any";
 type PayF = "all" | "cash" | "upi" | "card" | "split";
@@ -95,7 +95,13 @@ export default function OrdersPage() {
 
   /* Any filter change starts the list again from page 1 (otherwise an invisible
      page number carries over to a shorter result set). */
-  useEffect(() => { setPage(1); }, [type, date, from, to, needle, pay]);
+  // a new filter starts the list again from page 1
+  const pageKey = JSON.stringify([type, date, from, to, needle, pay]);
+  const [seenKey, setSeenKey] = useState(pageKey);
+  if (seenKey !== pageKey) {
+    setSeenKey(pageKey);
+    setPage(1);
+  }
 
   /* The bills on screen as an Excel workbook with real columns. */
   const exportRows = (): (string | number)[][] => [
@@ -460,19 +466,59 @@ export default function OrdersPage() {
   );
 }
 
-/* Fix a bill's customer details or how it was paid. The items and amounts stay as they were
-   (void the bill and bill again to change those). Staff edits go to the admin to approve. */
+let itemSeq = 0; // keys for the item rows in the edit form
+
+/* Edit an invoice: who it was for, its date, its items and prices, the discount, extra charges
+   and GST (the total is worked out again), and how it was paid. Changing quantities puts stock
+   back or takes it out. A bill that earned or used loyalty points, or a voided one, keeps its
+   amounts — void it and bill again for those. Staff edits go to the admin to approve. */
 function EditBill({ b, admin, onClose, onSaved }: { b: Bill; admin: boolean; onClose: () => void; onSaved: (b: Bill) => void }) {
   const { act, toast } = useAdmin();
-  const [f, setF] = useState({ customerName: b.customerName, customerPhone: b.customerPhone, payment: b.payment as string, cashAmount: b.cashAmount ? String(b.cashAmount) : "", upiAmount: b.upiAmount ? String(b.upiAmount) : "", cardAmount: b.cardAmount ? String(b.cardAmount) : "" });
+  const [f, setF] = useState({
+    customerName: b.customerName,
+    customerPhone: b.customerPhone,
+    invoiceDate: shopToday(b.createdAt),
+    payment: b.payment as string,
+    cashAmount: b.cashAmount ? String(b.cashAmount) : "",
+    upiAmount: b.upiAmount ? String(b.upiAmount) : "",
+    cardAmount: b.cardAmount ? String(b.cardAmount) : "",
+    manualType: b.manualType as string,
+    manualValue: b.manualValue ? String(b.manualValue) : "",
+    extra: b.extra ? String(b.extra) : "",
+    isGst: b.isGst,
+    gstPercent: String(b.gstPercent || 18),
+  });
+  const [items, setItems] = useState(() => b.items.map((i) => ({ key: ++itemSeq, productId: i.productId, name: i.name, price: String(i.price), qty: i.qty })));
   const [busy, setBusy] = useState(false);
-  const locked = !!b.loyaltyCustomerId || b.pointsEarned > 0 || b.pointsRedeemed > 0;
+
+  const loyaltyLocked = !!b.loyaltyCustomerId || b.pointsEarned > 0 || b.pointsRedeemed > 0 || b.rewardDiscount > 0 || b.pointsDiscount > 0;
+  const amountsLocked = loyaltyLocked || b.status !== "completed";
+  const setItem = (key: number, p: Partial<(typeof items)[number]>) => setItems((xs) => xs.map((x) => (x.key === key ? { ...x, ...p } : x)));
+
+  // the new totals, worked out the way the server will
+  const coupon: Coupon | null = b.couponCode ? { id: "", audience: "all", code: b.couponCode, percent: b.couponPercent, minOrder: 0, expiresAt: null, limit: null, used: 0, active: true, restricted: false, phones: [], sent: 0, createdAt: 0 } : null;
+  const clean = items.filter((i) => i.name.trim() && Number(i.price) >= 0 && i.qty >= 1).map((i) => ({ productId: i.productId, name: i.name.trim(), price: Number(i.price) || 0, qty: i.qty }));
+  const calc = computeBill({ items: clean, coupon, manualType: f.manualType === "percent" ? "percent" : "amount", manualValue: Number(f.manualValue) || 0, extra: Number(f.extra) || 0, gst: f.isGst, gstPercent: Number(f.gstPercent) || 0 });
+  const total = amountsLocked ? b.total : calc.total;
+
   const split = f.payment === "split";
   const sum = round2((Number(f.cashAmount) || 0) + (Number(f.upiAmount) || 0) + (Number(f.cardAmount) || 0));
-  const splitBad = split && Math.abs(sum - b.total) > 0.01;
+  const splitBad = split && Math.abs(sum - total) > 0.01;
+  const noItems = !amountsLocked && !clean.length;
+
   const save = async () => {
     setBusy(true);
-    const r = await act<Bill>("bill.edit", { id: b.id, ...f });
+    const r = await act<Bill>("bill.edit", {
+      id: b.id,
+      customerName: f.customerName,
+      customerPhone: f.customerPhone,
+      invoiceDate: f.invoiceDate,
+      payment: f.payment,
+      cashAmount: f.cashAmount,
+      upiAmount: f.upiAmount,
+      cardAmount: f.cardAmount,
+      ...(amountsLocked ? {} : { items: clean, manualType: f.manualType, manualValue: f.manualValue, extra: f.extra, isGst: f.isGst, gstPercent: f.gstPercent }),
+    });
     setBusy(false);
     if (r.ok) {
       if (!r.pending) {
@@ -482,57 +528,159 @@ function EditBill({ b, admin, onClose, onSaved }: { b: Bill; admin: boolean; onC
       onClose();
     }
   };
+
+  const lbl = "mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500";
   return (
     <Modal
       open
+      wide
       onClose={onClose}
-      title={`Edit details · ${b.invoiceNo}`}
+      title={`Edit invoice · ${b.invoiceNo}`}
       footer={
         <>
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn kind="dark" disabled={busy || splitBad} onClick={save}>
+          <Btn kind="dark" disabled={busy || splitBad || noItems} onClick={save}>
             {busy ? "Saving…" : admin ? "Save changes" : "Send for approval"}
           </Btn>
         </>
       }
     >
-      <div className="space-y-4">
+      <div className="space-y-5">
         {!admin && <p className="rounded-xl bg-amber-50 px-4 py-2.5 text-[12.5px] font-semibold text-amber-800">Your changes go to the admin, and apply only once they approve.</p>}
-        <Field label="Customer name">
-          <input className={inputCls} value={f.customerName} maxLength={80} onChange={(e) => setF({ ...f, customerName: e.target.value })} />
-        </Field>
-        <Field label="Mobile" hint={locked ? "This bill earned or used loyalty points, so the mobile is fixed." : undefined}>
-          <input className={inputCls} inputMode="numeric" disabled={locked} value={f.customerPhone} maxLength={14} onChange={(e) => setF({ ...f, customerPhone: e.target.value.replace(/[^\d+ ]/g, "") })} />
-        </Field>
-        <Field label={`Paid by · bill total ${rupee(b.total)}`} hint={b.status !== "completed" ? "A voided bill's payment can't be changed." : undefined}>
-          <select className={inputCls} disabled={b.status !== "completed"} value={f.payment} onChange={(e) => setF({ ...f, payment: e.target.value })}>
-            <option value="cash">Cash</option>
-            <option value="upi">UPI / GPay / QR</option>
-            <option value="card">Card</option>
-            <option value="split">Split (two or more)</option>
-          </select>
-        </Field>
-        {split && (
-          <div className="space-y-2">
-            <div className="grid grid-cols-3 gap-2">
-              {(
-                [
-                  ["cashAmount", "Cash"],
-                  ["upiAmount", "UPI"],
-                  ["cardAmount", "Card"],
-                ] as const
-              ).map(([k, label]) => (
-                <Field key={k} label={label}>
-                  <input className={inputCls} type="number" min={0} step="0.01" inputMode="decimal" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
-                </Field>
-              ))}
-            </div>
-            <p className={cx("text-[12px] font-semibold", splitBad ? "text-red-600" : "text-emerald-700")}>
-              {rupee(sum)} of {rupee(b.total)}
-              {splitBad ? ` — ${rupee(Math.abs(round2(b.total - sum)))} ${sum < b.total ? "short" : "over"}` : " — adds up"}
-            </p>
+
+        <section className="grid gap-3 sm:grid-cols-3">
+          <Field label="Customer name">
+            <input className={inputCls} value={f.customerName} maxLength={80} onChange={(e) => setF({ ...f, customerName: e.target.value })} />
+          </Field>
+          <Field label="Mobile" hint={loyaltyLocked ? "Fixed — this bill used loyalty." : undefined}>
+            <input className={inputCls} inputMode="numeric" disabled={loyaltyLocked} value={f.customerPhone} maxLength={14} onChange={(e) => setF({ ...f, customerPhone: e.target.value.replace(/[^\d+ ]/g, "") })} />
+          </Field>
+          <Field label="Invoice date" hint={loyaltyLocked ? "Fixed — this bill used loyalty." : undefined}>
+            <input className={inputCls} type="date" disabled={loyaltyLocked} max={shopToday()} value={f.invoiceDate} onChange={(e) => setF({ ...f, invoiceDate: e.target.value })} />
+          </Field>
+        </section>
+
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <span className={lbl}>Items</span>
+            {!amountsLocked && (
+              <Btn size="sm" icon="plus" onClick={() => setItems((xs) => [...xs, { key: ++itemSeq, productId: null, name: "", price: "", qty: 1 }])}>
+                Add item
+              </Btn>
+            )}
           </div>
+          {amountsLocked && (
+            <p className="mb-2 rounded-xl bg-slate-50 px-3.5 py-2 text-[12.5px] text-slate-600">
+              {b.status !== "completed" ? "This bill is void, so its items and amounts can't be changed." : "This bill earned or used loyalty points, so its items and amounts are fixed. Void it and bill again to change them."}
+            </p>
+          )}
+          <ul className="space-y-2">
+            {items.map((i) => (
+              <li key={i.key} className="grid grid-cols-[1fr_88px_72px_auto] items-center gap-2">
+                <input className={inputCls} disabled={amountsLocked} value={i.name} maxLength={120} placeholder="Item" onChange={(e) => setItem(i.key, { name: e.target.value })} aria-label="Item name" />
+                <input className={cx(inputCls, "text-right")} disabled={amountsLocked} type="number" min={0} step="0.5" inputMode="decimal" value={i.price} placeholder="Price" onChange={(e) => setItem(i.key, { price: e.target.value })} aria-label="Price" />
+                <input className={cx(inputCls, "text-right")} disabled={amountsLocked} type="number" min={1} max={999} step={1} inputMode="numeric" value={i.qty} onChange={(e) => setItem(i.key, { qty: Math.max(1, Math.min(999, Math.floor(Number(e.target.value)) || 1)) })} aria-label="Quantity" />
+                {!amountsLocked && items.length > 1 ? (
+                  <button type="button" onClick={() => setItems((xs) => xs.filter((x) => x.key !== i.key))} className="grid h-10 w-10 place-items-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Remove item">
+                    <Icon name="x" size={15} />
+                  </button>
+                ) : (
+                  <span className="w-10" />
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {!amountsLocked && (
+          <section className="grid gap-3 sm:grid-cols-3">
+            <Field label="Discount">
+              <div className="flex gap-2">
+                <select className={cx(inputCls, "w-20")} value={f.manualType} onChange={(e) => setF({ ...f, manualType: e.target.value })} aria-label="Discount type">
+                  <option value="amount">₹</option>
+                  <option value="percent">%</option>
+                </select>
+                <input className={inputCls} type="number" min={0} step="0.5" inputMode="decimal" value={f.manualValue} placeholder="0" onChange={(e) => setF({ ...f, manualValue: e.target.value })} />
+              </div>
+            </Field>
+            <Field label="Extra charges (₹)">
+              <input className={inputCls} type="number" min={0} step="0.5" inputMode="decimal" value={f.extra} placeholder="0" onChange={(e) => setF({ ...f, extra: e.target.value })} />
+            </Field>
+            <Field label="GST">
+              <div className="flex items-center gap-3">
+                <Switch on={f.isGst} onChange={(v) => setF({ ...f, isGst: v })} label="GST invoice" />
+                {f.isGst && <input className={cx(inputCls, "w-24")} type="number" min={0} max={100} step="0.5" inputMode="decimal" value={f.gstPercent} onChange={(e) => setF({ ...f, gstPercent: e.target.value })} aria-label="GST percent" />}
+                {f.isGst && <span className="text-[12px] text-slate-500">%</span>}
+              </div>
+            </Field>
+          </section>
         )}
+
+        <section className="rounded-2xl bg-slate-50 p-4 text-[13px]">
+          <dl className="space-y-1">
+            <div className="flex justify-between">
+              <dt className="text-slate-500">Subtotal</dt>
+              <dd>{rupee(amountsLocked ? b.subtotal : calc.subtotal)}</dd>
+            </div>
+            {(amountsLocked ? b.discount : calc.discount) > 0 && (
+              <div className="flex justify-between text-red-600">
+                <dt>Discounts{b.couponCode ? ` (incl. ${b.couponCode})` : ""}</dt>
+                <dd>-{rupee(amountsLocked ? b.discount : calc.discount)}</dd>
+              </div>
+            )}
+            {(amountsLocked ? b.extra : calc.extra) > 0 && (
+              <div className="flex justify-between">
+                <dt className="text-slate-500">Extra charges</dt>
+                <dd>{rupee(amountsLocked ? b.extra : calc.extra)}</dd>
+              </div>
+            )}
+            {(amountsLocked ? b.isGst : f.isGst) && (
+              <div className="flex justify-between">
+                <dt className="text-slate-500">GST ({amountsLocked ? b.gstPercent : calc.gstPercent}%)</dt>
+                <dd>{rupee(amountsLocked ? b.gstAmount : calc.gstAmount)}</dd>
+              </div>
+            )}
+            <div className="flex justify-between border-t border-slate-200 pt-2 text-[16px]">
+              <dt className="font-bold">Invoice total</dt>
+              <dd className="adm-num font-extrabold">
+                {rupee(total)}
+                {total !== b.total && <span className="ml-2 text-[12px] font-semibold text-slate-400 line-through">{rupee(b.total)}</span>}
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="space-y-3">
+          <Field label="Paid by" hint={b.status !== "completed" ? "A voided bill's payment can't be changed." : total !== b.total ? "The total changed — check how it was paid." : undefined}>
+            <select className={inputCls} disabled={b.status !== "completed"} value={f.payment} onChange={(e) => setF({ ...f, payment: e.target.value })}>
+              <option value="cash">Cash</option>
+              <option value="upi">UPI / GPay / QR</option>
+              <option value="card">Card</option>
+              <option value="split">Split (two or more)</option>
+            </select>
+          </Field>
+          {split && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                {(
+                  [
+                    ["cashAmount", "Cash"],
+                    ["upiAmount", "UPI"],
+                    ["cardAmount", "Card"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <Field key={k} label={label}>
+                    <input className={inputCls} type="number" min={0} step="0.01" inputMode="decimal" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+                  </Field>
+                ))}
+              </div>
+              <p className={cx("text-[12px] font-semibold", splitBad ? "text-red-600" : "text-emerald-700")}>
+                {rupee(sum)} of {rupee(total)}
+                {splitBad ? ` — ${rupee(Math.abs(round2(total - sum)))} ${sum < total ? "short" : "over"}` : " — adds up"}
+              </p>
+            </div>
+          )}
+        </section>
       </div>
     </Modal>
   );

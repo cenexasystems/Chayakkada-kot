@@ -154,8 +154,9 @@ function ItemPicker({ ingredients: ings, products, initialKind = "all", onPick, 
 
   const empty = (kind === "ing" ? ingRows.length : kind === "prod" ? prodRows.length : ingRows.length + prodRows.length) === 0;
 
-  const Tab = ({ v, label, count }: { v: PickKind; label: string; count: number }) => (
+  const tab = (v: PickKind, label: string, count: number) => (
     <button
+      key={v}
       type="button"
       onClick={() => setKind(v)}
       className={cx("h-9 rounded-xl px-3.5 text-[12px] font-extrabold uppercase tracking-wide transition", kind === v ? "bg-white text-slate-900 shadow" : "text-slate-500 hover:text-slate-800")}
@@ -217,9 +218,9 @@ function ItemPicker({ ingredients: ings, products, initialKind = "all", onPick, 
           </select>
         </div>
         <div className="flex gap-1 rounded-2xl bg-slate-100 p-1">
-          <Tab v="all" label="All" count={ingRows.length + prodRows.length} />
-          <Tab v="ing" label="Ingredients" count={ingRows.length} />
-          <Tab v="prod" label="Inventory" count={prodRows.length} />
+          {tab("all", "All", ingRows.length + prodRows.length)}
+          {tab("ing", "Ingredients", ingRows.length)}
+          {tab("prod", "Inventory", prodRows.length)}
         </div>
         <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
           {empty && <Empty icon="box" title="Nothing matched">Try a different search.</Empty>}
@@ -504,8 +505,8 @@ export default function IngredientsPage() {
   const [batchOpen, setBatchOpen] = useState(false);
   const [q, setQ] = useState("");
 
-  const ings = s.ingredients ?? [];
-  const active = ings.filter((i) => i.active);
+  const ings = useMemo(() => s.ingredients ?? [], [s.ingredients]);
+  const active = useMemo(() => ings.filter((i) => i.active), [ings]);
   const low = active.filter((i) => i.lowAt > 0 && i.stock <= i.lowAt);
   const stockValue = active.reduce((sum, i) => sum + i.stock * i.costPerUnit, 0);
 

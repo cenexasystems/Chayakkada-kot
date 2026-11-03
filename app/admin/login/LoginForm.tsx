@@ -41,7 +41,7 @@ export default function LoginForm({ logo = "" }: { logo?: string }) {
           <path d="M9 38h30" stroke="#c9852a" strokeWidth="1.5" strokeLinecap="round" />
         </svg>)}
         <h1 className="adm-title mt-4 text-[28px] leading-none text-slate-900 sm:text-[32px]">Sign in</h1>
-        <p className="mt-1 text-[14px] text-slate-500">8:2's chayakkada · orders &amp; billing</p>
+        <p className="mt-1 text-[14px] text-slate-500">8:2&apos;s chayakkada · orders &amp; billing</p>
         <div className="mt-6 space-y-4">
           <Field label="Password">
             <div className="relative">

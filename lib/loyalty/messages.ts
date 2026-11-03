@@ -5,6 +5,7 @@ export function fillMessage(template: string, values: Record<string, string | nu
     .replace(/\{(\w+)\}/g, (_m, k: string) => String(values[k] ?? ""))
     .replace(/[ \t]{2,}/g, " ")
     .replace(/ +([.,!?])/g, "$1")
+    .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

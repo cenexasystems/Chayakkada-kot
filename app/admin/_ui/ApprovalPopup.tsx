@@ -17,6 +17,7 @@ function fmt(k: string, v: unknown): string {
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v === "boolean") return v ? "Yes" : "No";
   if (k === "unit") return INGREDIENT_UNITS.find((u) => u.key === v)?.label ?? String(v);
+  if (Array.isArray(v) && v.length && typeof v[0] === "object") return v.map((i: { qty?: number; name?: string; price?: number }) => `${i.qty}× ${i.name} @ ₹${i.price}`).join(", ");
   if (Array.isArray(v)) return v.join(", ") || "—";
   return String(v);
 }
@@ -27,7 +28,7 @@ function Details({ r }: { r: ApprovalRequest }) {
     return <p className="rounded-xl bg-red-50 px-4 py-3 text-[13px] text-red-800">Remove <b>{r.targetName}</b>. Past records stay.</p>;
   }
   const rows = Object.entries(r.payload)
-    .filter(([k, v]) => !SKIP.has(k) && (typeof v !== "object" || Array.isArray(v)) && String(v).length <= 120)
+    .filter(([k, v]) => !SKIP.has(k) && (typeof v !== "object" || v === null || Array.isArray(v)) && fmt(k, v).length <= 600)
     .map(([k, v]) => ({ k, was: k in b ? fmt(k, b[k]) : null, now: fmt(k, v) }))
     // changed fields, and fields that have no "before" (e.g. the reason for a points adjustment)
     .filter((x) => x.was === null || x.was !== x.now);

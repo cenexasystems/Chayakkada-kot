@@ -47,7 +47,13 @@ export default function SuppliersPage() {
 
   const byId = useMemo(() => new Map(s.suppliers.map((x) => [x.id, x])), [s.suppliers]);
   const range = useMemo(() => rangeOf(period, from, to), [period, from, to]);
-  useEffect(() => setPage(1), [period, from, to, supplier, status, q]);
+  // a new filter starts the list again from page 1
+  const pageKey = JSON.stringify([period, from, to, supplier, status, q]);
+  const [seenKey, setSeenKey] = useState(pageKey);
+  if (seenKey !== pageKey) {
+    setSeenKey(pageKey);
+    setPage(1);
+  }
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
