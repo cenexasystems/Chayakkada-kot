@@ -508,7 +508,7 @@ export default function InventoryPage() {
                         kind="plain"
                         className="text-red-600 hover:bg-red-50"
                         onClick={async () => {
-                          if (await confirm({ title: `Delete ${p.name}?`, body: "It disappears from the menu and catalog. Past orders and bills keep their copy. To hide it for a while, switch “On menu” off instead.", ok: "Delete", danger: true }))
+                          if (await confirm({ title: `Delete ${p.name}?`, body: "It disappears from the menu and catalog, and its stock movement history is deleted too. Past orders and bills keep their copy of what was sold. To hide it for a while, switch “On menu” off instead.", ok: "Delete", danger: true }))
                             act("product.delete", { id: p.id });
                         }}
                         aria-label={`Delete ${p.name}`}

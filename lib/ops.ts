@@ -4,7 +4,7 @@ import { code, uid } from "./seed";
 import { TZ, checkCoupon, computeBill, round2, shopToday } from "./money";
 import { hashPassword } from "./auth";
 import { db, type Db, type Tx } from "./db";
-import { batches, bills, coupons, expenseCategories, expenses, ingredientMoves, ingredients, meta, orders, products, recipes, sessions, settings, staffUsers, stockMovements, supplierInvoices, suppliers, approvalRequests, activityLog, loyaltyCustomers, loyaltyRewards, loyaltyCampaigns, productCategories } from "./db/schema";
+import { batches, bills, coupons, expenseCategories, expenses, ingredientMoves, ingredients, meta, orders, products, recipes, sessions, settings, staffUsers, stockMovements, supplierInvoices, suppliers, approvalRequests, activityLog, loyaltyCustomers, loyaltyRewards, loyaltyCampaigns, loyaltyVouchers, productCategories } from "./db/schema";
 import * as L from "./loyalty/server";
 import { pointsPerUnit } from "./loyalty/engine";
 import type { LoyaltyConfig } from "./loyalty/config";
@@ -1288,6 +1288,15 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         return saveProduct(tx, a, role);
       case "product.delete": {
         const p = await must(tx.select().from(products).where(eq(products.id, id)), "Product");
+        /* The product's stock history goes with it, so the Stock movement log doesn't keep lines for something
+           that no longer exists. Past orders and bills keep their own copy of what was sold (they are money
+           records), and the Activity log still shows that the product was deleted. */
+        await tx.delete(stockMovements).where(eq(stockMovements.productId, p.id));
+        // nothing is left pointing at the deleted product: a free-item reward for it is switched off, waiting
+        // free-item vouchers for it are cancelled, and campaigns stop targeting it
+        await tx.update(loyaltyRewards).set({ productId: null, active: false }).where(eq(loyaltyRewards.productId, p.id));
+        await tx.update(loyaltyVouchers).set({ status: "cancelled", note: "The product was deleted" }).where(and(eq(loyaltyVouchers.productId, p.id), eq(loyaltyVouchers.status, "issued")));
+        await tx.update(loyaltyCampaigns).set({ productIds: sql`${loyaltyCampaigns.productIds} - ${p.id}::text` }).where(sql`${loyaltyCampaigns.productIds} ? ${p.id}`);
         await tx.delete(products).where(eq(products.id, p.id));
         return null;
       }
