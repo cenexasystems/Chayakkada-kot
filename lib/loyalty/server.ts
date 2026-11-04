@@ -169,6 +169,26 @@ export async function registerCustomer(tx: Tx, a: Args, actor: string): Promise<
   return c;
 }
 
+/** Removes a member from the loyalty programme for good: their points history and balances, point lots, rewards,
+    stamps and referral links, and the audit lines about them. Their bills stay (money records, and still in
+    Orders) but stop pointing at a member. Friends they referred simply lose the "referred by" link. One audit
+    line records that the member was deleted, and who did it. */
+export async function deleteCustomer(tx: Tx, a: Args, actor: string) {
+  const c = await mustCustomer(tx, str(a.id, 40));
+  const held = c.available;
+  await tx.delete(loyaltyLots).where(eq(loyaltyLots.customerId, c.id));
+  await tx.delete(loyaltyLedger).where(eq(loyaltyLedger.customerId, c.id));
+  await tx.delete(loyaltyVouchers).where(eq(loyaltyVouchers.customerId, c.id));
+  await tx.delete(loyaltyStamps).where(eq(loyaltyStamps.customerId, c.id));
+  await tx.delete(loyaltyReferrals).where(or(eq(loyaltyReferrals.referrerId, c.id), eq(loyaltyReferrals.refereeId, c.id)));
+  await tx.update(loyaltyCustomers).set({ referredBy: null }).where(eq(loyaltyCustomers.referredBy, c.id));
+  await tx.update(bills).set({ loyaltyCustomerId: null }).where(eq(bills.loyaltyCustomerId, c.id));
+  await tx.delete(loyaltyAudit).where(eq(loyaltyAudit.customerId, c.id));
+  await tx.delete(loyaltyCustomers).where(eq(loyaltyCustomers.id, c.id));
+  await audit(tx, actor, "customer.delete", { ref: c.code, before: { name: c.name, phone: c.phone, tier: c.tier, pointsHeld: held, lifetime: c.lifetime }, reason: str(a.reason, 300) });
+  return { id: c.id, name: c.name };
+}
+
 export async function updateCustomer(tx: Tx, a: Args, actor: string): Promise<LoyaltyCustomer> {
   const c = await mustCustomer(tx, str(a.id, 40));
   const email = a.email === undefined ? c.email : str(a.email, 120);

@@ -1690,6 +1690,9 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         return L.registerCustomer(tx, a, role);
       case "loyalty.update":
         return L.updateCustomer(tx, a, role);
+      case "loyalty.delete":
+        if (role !== "admin") throw new ApiError("Only the admin can do that.", 403);
+        return L.deleteCustomer(tx, a, role);
       case "loyalty.status":
         return L.setStatus(tx, a, role);
       case "loyalty.adjust":

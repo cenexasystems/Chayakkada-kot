@@ -202,7 +202,7 @@ function RegisterModal({ onClose, onDone }: { onClose: () => void; onDone: (id: 
 type Dialog = null | "edit" | "adjust" | "status" | "issue" | { refund: Bill } | { cancel: Voucher };
 
 function Profile({ c, d, bills, onClose }: { c: LoyaltyCustomer; d: LoyaltyState; bills: Bill[]; onClose: () => void }) {
-  const { s, role } = useAdmin();
+  const { s, role, act, confirm, toast } = useAdmin();
   const admin = role === "admin";
   const cfg = d.config;
   const st = useStatsByPhone(bills, cfg.crm.frequentDays).get(c.phone) ?? EMPTY_STATS;
@@ -230,6 +230,44 @@ function Profile({ c, d, bills, onClose }: { c: LoyaltyCustomer; d: LoyaltyState
   const referrer = c.referredBy ? d.customers.find((x) => x.id === c.referredBy) : null;
   const referred = d.referrals.filter((r) => r.referrerId === c.id);
   const expiring = d.expiringSoon.find((x) => x.customerId === c.id);
+
+  /* Delete the member for good — asks first, and says exactly what goes and what stays */
+  const remove = async () => {
+    const waiting = vouchers.filter((v) => v.status === "issued").length;
+    const yes = await confirm({
+      title: `Delete ${c.name} from loyalty?`,
+      danger: true,
+      ok: "Yes, delete member",
+      body: (
+        <div className="space-y-2.5 text-[13.5px] leading-relaxed text-slate-700">
+          <p>
+            <b>{c.name}</b> ({c.phone}) will be removed from the loyalty programme for good.
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              Their <b>{c.available} points</b> ({rupee(pointsValue(c.available, cfg))}), points history and {c.lifetime} lifetime points are erased.
+            </li>
+            <li>
+              {waiting ? `${waiting} reward${waiting === 1 ? "" : "s"} waiting to be used ${waiting === 1 ? "is" : "are"} lost, and ` : ""}their reward history, visit stamps and referral links are erased.
+            </li>
+            {bills.length > 0 && (
+              <li>
+                Their <b>{bills.length} bill{bills.length === 1 ? "" : "s"}</b> stay in Orders and in your sales — they just stop being linked to loyalty.
+              </li>
+            )}
+            <li>Their wallet link stops working.</li>
+          </ul>
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-[12.5px] font-semibold text-amber-800">This can&apos;t be undone. If you only want them to stop earning points, use Deactivate instead — it keeps everything.</p>
+        </div>
+      ),
+    });
+    if (!yes) return;
+    const r = await act("loyalty.delete", { id: c.id });
+    if (r.ok) {
+      toast({ kind: "ok", title: `${c.name} was deleted from loyalty` });
+      onClose();
+    }
+  };
   const history = d.audit.filter((a) => a.customerId === c.id);
   const base = (s.settings.publicUrl || (typeof window !== "undefined" ? window.location.origin : "")).replace(/\/$/, "");
   const walletLink = `${base}/w/${c.walletToken}`;
@@ -333,6 +371,9 @@ function Profile({ c, d, bills, onClose }: { c: LoyaltyCustomer; d: LoyaltyState
               </Btn>
               <Btn size="sm" kind={c.status === "active" ? "warn" : "ok"} onClick={() => setDlg("status")}>
                 {c.status === "active" ? "Deactivate" : "Reactivate"}
+              </Btn>
+              <Btn size="sm" kind="red" icon="trash" onClick={remove}>
+                Delete member
               </Btn>
             </>
           )}

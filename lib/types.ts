@@ -214,6 +214,7 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   "bill.void": "Voided a bill",
   "loyalty.register": "Enrolled a loyalty member",
   "loyalty.update": "Edited a loyalty member",
+  "loyalty.delete": "Deleted a loyalty member",
   "loyalty.status": "Changed a member's status",
   "loyalty.adjust": "Adjusted loyalty points",
   "loyalty.issueReward": "Issued a reward",

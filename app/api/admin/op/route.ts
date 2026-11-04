@@ -31,6 +31,7 @@ const ADMIN_ONLY_OPS = new Set([
   "approval.reject",
   "recipe.delete",
   // loyalty: staff may look up, enrol, redeem and issue rewards; settings and corrections are the owner's
+  "loyalty.delete",
   "loyalty.cancelVoucher",
   "loyalty.refund",
   "loyalty.grant",
