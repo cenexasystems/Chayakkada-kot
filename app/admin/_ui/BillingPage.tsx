@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Bill, Coupon, DiscountType, OrderItem, PayMethod } from "@/lib/types";
+import { UPI_CHANNELS, type Bill, type UpiChannel, type Coupon, type DiscountType, type OrderItem, type PayMethod } from "@/lib/types";
 import { checkCoupon, computeBill, couponStatus, mergeItems, round2, rupee } from "@/lib/money";
 import { useAdmin, whoIs, type FloorTab } from "./Store";
 import Catalog from "./Catalog";
@@ -76,6 +76,9 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const [tierBefore, setTierBefore] = useState(""); // the member's tier before this bill, to spot an upgrade
   const [busy, setBusy] = useState(false);
   // loyalty: a reward ("v:REF" voucher or "r:id" catalogue reward) and points to redeem
+  // how a UPI payment reaches the shop: picked by staff, or worked out (guest's phone / the WhatsApp link we sent / the counter QR)
+  const [upiVia, setUpiVia] = useState<UpiChannel | "">("");
+  const [linkSent, setLinkSent] = useState(false);
   const [lSel, setLSel] = useState("");
   const [lPts, setLPts] = useState("");
   const loyal = useLoyaltyLookup(phone, s.version);
@@ -87,6 +90,8 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const lost = mode === "tab" && sel && !f;
 
   const reset = (keepMode = true) => {
+    setUpiVia("");
+    setLinkSent(false);
     setSel(null);
     setLines([blank()]);
     setName("");
@@ -116,6 +121,8 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     setLSel("");
     setLPts("");
     setCoupon(x.session.couponCode ?? "");
+    setUpiVia("");
+    setLinkSent(false);
     if (x.session.payClaimedAt) setPay("upi"); // the guest says they paid by UPI
     setSig(sigOf(x));
   };
@@ -165,11 +172,13 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
         `Pay by UPI: ${d.url}`,
         `Pay to: ${d.upiName}`,
         `UPI ID: ${d.upiId}`,
+        ...(d.upiPhone ? [`GPay number: ${d.upiPhone.slice(0, 5)} ${d.upiPhone.slice(5)}`] : []),
         `Amount: ${rupee(amount)}`,
         "",
         "After paying, please show the confirmation at the counter.",
       ].join("\n");
       if (w) w.location.href = waLink(phone, text);
+      setLinkSent(true); // if they then pay, it is recorded as paid through the WhatsApp link
     } catch (e) {
       w?.close();
       toast({ kind: "err", title: (e as Error).message });
@@ -182,6 +191,9 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const sCard = Number(splitCard) || 0;
   const splitOff = round2(calc.total - sCash - sUpi - sCard);
   const splitUsed = [sCash, sUpi, sCard].filter((n) => n > 0).length;
+  const upiUsed = pay === "upi" || (pay === "split" && sUpi > 0);
+  const defaultVia: UpiChannel = f?.session.payClaimedAt ? "guest_phone" : linkSent ? "whatsapp_link" : "counter_qr";
+  const via: UpiChannel = upiVia || defaultVia;
 
   const problems: string[] = [];
   if (mode === "tab" && !f) problems.push("Pick a customer with an open tab.");
@@ -217,6 +229,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
       cashAmount: splitCash,
       upiAmount: splitUpi,
       cardAmount: splitCard,
+      ...(upiUsed ? { upiChannel: via } : {}),
       ...loy.payload,
     });
     setBusy(false);
@@ -653,8 +666,21 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               ) : (
                 <p className="text-[12.5px] text-slate-500">Collect {rupee(calc.total)} by {pay === "upi" ? "UPI" : "card"}, then complete the bill.</p>
               )}
+              {upiUsed && (
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">UPI payment came through</span>
+                  <select className="h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-[14px] font-semibold text-slate-800 outline-none focus:border-slate-400" value={via} onChange={(e) => setUpiVia(e.target.value as UpiChannel)}>
+                    {UPI_CHANNELS.map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="mt-1 block text-[11.5px] text-slate-500">Printed on the invoice and kept in reports, so payments from a WhatsApp link, the counter QR and a guest&apos;s phone can be told apart.</span>
+                </label>
+              )}
               {s.settings.upiId && (pay === "upi" ? calc.total : pay === "split" ? sUpi : 0) > 0 && (
-                <UpiQrCard upi={{ id: s.settings.upiId, name: s.settings.upiName || shop, minutes: s.settings.upiQrMinutes }} amount={pay === "upi" ? calc.total : sUpi} shop={shop} label={pay === "upi" ? "Scan to pay" : "Scan to pay the UPI part:"} />
+                <UpiQrCard upi={{ id: s.settings.upiId, name: s.settings.upiName || shop, minutes: s.settings.upiQrMinutes, phone: s.settings.upiPhone }} amount={pay === "upi" ? calc.total : sUpi} shop={shop} label={pay === "upi" ? "Scan to pay" : "Scan to pay the UPI part:"} />
               )}
               {upiOn && calc.total > 0 && ((mode === "tab" && !!f) || okPhone(phone)) && (
                 <div className="mt-3 space-y-2 rounded-2xl border border-dashed border-slate-300 p-3">

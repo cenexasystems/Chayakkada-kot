@@ -73,7 +73,7 @@ function Settings({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState({
     shopName: d.shopName, ownerName: d.ownerName, location: d.location, address: d.address, address2: d.address2,
     whatsapp1: d.whatsapp1, whatsapp2: d.whatsapp2, customerCare: d.customerCare, email: d.email, mapsUrl: d.mapsUrl, logoUrl: d.logoUrl,
-    upiId: d.upiId, upiName: d.upiName, upiQrMinutes: String(d.upiQrMinutes),
+    upiId: d.upiId, upiName: d.upiName, upiPhone: d.upiPhone, upiQrMinutes: String(d.upiQrMinutes),
   });
   const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [k]: e.target.value });
@@ -129,6 +129,7 @@ function Settings({ onClose }: { onClose: () => void }) {
             <p className="text-[12px] text-slate-500">Guests see a UPI QR (with their exact amount) on their phone tab. It is your own UPI ID, so there are no fees — but the app can&apos;t see the payment, so staff check their UPI app and confirm. Leave the UPI ID blank to switch it off.</p>
             <Field label="Shop UPI ID" hint="Like name@bank"><input className={inputCls} value={form.upiId} maxLength={80} onChange={set("upiId")} placeholder="yourshop@okicici" autoCapitalize="none" /></Field>
             <Field label="Name shown in the UPI app" hint="Blank uses the shop name"><input className={inputCls} value={form.upiName} maxLength={60} onChange={set("upiName")} /></Field>
+            <Field label="GPay / PhonePe number (optional)" hint="Shown next to the UPI ID so customers can also pay by typing this number in GPay. 10 digits."><input className={inputCls} inputMode="numeric" value={form.upiPhone} maxLength={14} onChange={set("upiPhone")} placeholder="98765 43210" /></Field>
             <Field label="Change the QR every (minutes)" hint="A fresh QR replaces the old one on the guest's screen"><input className={inputCls} type="number" min={1} max={30} inputMode="numeric" value={form.upiQrMinutes} onChange={set("upiQrMinutes")} /></Field>
           </div>
           <Field label="Logo" hint="Upload a PNG or JPG, or paste an image link. Blank uses the built-in icon.">

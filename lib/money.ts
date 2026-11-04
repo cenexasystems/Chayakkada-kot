@@ -1,4 +1,4 @@
-import type { Coupon, DiscountType, OrderItem } from "./types";
+import { UPI_CHANNELS, type Coupon, type DiscountType, type OrderItem } from "./types";
 
 /* Shared by the server (authoritative totals) and the billing screen (live preview). */
 
@@ -11,13 +11,19 @@ export const rupee = (n: number) => `₹${inr.format(Math.round(n * 100) / 100)}
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
 
-type Paid = { payment: "cash" | "upi" | "card" | "split"; cashAmount: number; upiAmount: number; cardAmount: number };
+type Paid = { payment: "cash" | "upi" | "card" | "split"; cashAmount: number; upiAmount: number; cardAmount: number; upiChannel?: string };
+
+/** "UPI", or "UPI · WhatsApp payment link" when it is known how the payment arrived. */
+export function upiText(channel?: string | null) {
+  const c = UPI_CHANNELS.find((x) => x.key === channel);
+  return c && c.key !== "other" ? `UPI · ${c.label}` : "UPI";
+}
 
 /** How a bill was paid, part by part — a split can be any mix of cash, UPI and card. */
 export function payParts(b: Paid): [string, number][] {
   const all: [string, number][] = [
     ["Cash", b.cashAmount],
-    ["UPI", b.upiAmount],
+    [upiText(b.upiChannel), b.upiAmount],
     ["Card", b.cardAmount],
   ];
   return all.filter(([, n]) => n > 0);
@@ -25,7 +31,7 @@ export function payParts(b: Paid): [string, number][] {
 
 /** "Cash", "UPI", "Card", or for a split the methods used, e.g. "Cash + UPI". */
 export function payLabel(b: Paid): string {
-  if (b.payment !== "split") return { cash: "Cash", upi: "UPI", card: "Card" }[b.payment];
+  if (b.payment !== "split") return { cash: "Cash", upi: upiText(b.upiChannel), card: "Card" }[b.payment];
   const parts = payParts(b);
   return parts.length ? parts.map(([m]) => m).join(" + ") : "Split";
 }

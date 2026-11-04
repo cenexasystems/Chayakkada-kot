@@ -75,6 +75,16 @@ export type BillSource = "tab" | "counter";
 /** "split" = paid with two or more of cash, UPI and card; cashAmount / upiAmount / cardAmount say how much each. */
 export type PayMethod = "cash" | "upi" | "card" | "split";
 export type DiscountType = "amount" | "percent";
+
+/** How a UPI payment reached the shop — kept on the bill so invoices and reports can tell them apart. */
+export const UPI_CHANNELS = [
+  { key: "counter_qr", label: "Counter QR" },
+  { key: "whatsapp_link", label: "WhatsApp payment link" },
+  { key: "guest_phone", label: "Guest's phone QR" },
+  { key: "gpay_number", label: "GPay number" },
+  { key: "other", label: "Other UPI" },
+] as const;
+export type UpiChannel = (typeof UPI_CHANNELS)[number]["key"];
 /** Who applied the coupon on a bill: the guest from their phone, or staff at billing. */
 export type CouponSource = "guest" | "staff";
 
@@ -109,6 +119,8 @@ export type Bill = {
   cashAmount: number;
   upiAmount: number;
   cardAmount: number;
+  /** how the UPI part arrived ("" when nothing was paid by UPI, or for older bills) */
+  upiChannel: UpiChannel | "";
   received: number;
   change: number;
   status: "completed" | "void";
@@ -486,7 +498,7 @@ export type DB = {
 
 /** What the admin panel receives (no secrets). */
 export type AdminState = Omit<DB, "settings" | "users"> & {
-  settings: ShopDetails & { shopName: string; publicUrl: string; walkInsOnly: boolean; kotEnabled: boolean; orderingEnabled: boolean; upiId: string; upiName: string; upiQrMinutes: number };
+  settings: ShopDetails & { shopName: string; publicUrl: string; walkInsOnly: boolean; kotEnabled: boolean; orderingEnabled: boolean; upiId: string; upiName: string; upiPhone: string; upiQrMinutes: number };
   users: PublicUser[];
   /** how loyalty points are earned, so each item can show what it earns */
   loyaltyEarn: Pick<LoyaltyConfig, "enabled" | "earn">;
@@ -525,7 +537,7 @@ export type TabView = {
     /** what the guest should expect to pay: total minus the coupon */
     payable: number;
     /** where to pay by UPI, when the shop has set it up */
-    upi: { id: string; name: string; minutes: number } | null;
+    upi: { id: string; name: string; minutes: number; phone: string } | null;
     /** the final amount staff approved — the payment QR shows on the guest's phone only after this */
     approved: { amount: number; at: number } | null;
     /** the guest has said they paid this much (it is for staff to confirm) */

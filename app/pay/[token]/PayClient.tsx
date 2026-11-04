@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { rupee } from "@/lib/money";
 import { Qr } from "@/app/admin/_ui/Qr";
-import { mmss, useUpiQr } from "@/app/_components/upiQr";
+import { mmss, spacedPhone, useUpiQr } from "@/app/_components/upiQr";
 
 /* The page behind the WhatsApp payment link. The QR and the "Open my UPI app" button carry the amount and the
    shop's UPI ID; the QR is renewed every few minutes. Nothing here confirms a payment — the counter checks
    their UPI app — so it asks the customer to show the payment confirmation. */
-export function PayClient({ amount, name, shop, logoUrl, upi }: { amount: number; name: string; shop: string; logoUrl: string; upi: { id: string; name: string; minutes: number } }) {
+export function PayClient({ amount, name, shop, logoUrl, upi }: { amount: number; name: string; shop: string; logoUrl: string; upi: { id: string; name: string; minutes: number; phone: string } }) {
   const { link, ref, left, ready } = useUpiQr(upi, amount, shop, "W");
   const [copied, setCopied] = useState("");
   const copy = async (what: string, v: string) => {
@@ -52,6 +52,17 @@ export function PayClient({ amount, name, shop, logoUrl, upi }: { amount: number
                 </button>
               </dd>
             </div>
+            {upi.phone && (
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-slate-500">GPay number</dt>
+                <dd className="flex items-center gap-2 font-bold">
+                  {spacedPhone(upi.phone)}
+                  <button type="button" onClick={() => copy("phone", upi.phone)} className="rounded-full border border-slate-300 px-2.5 py-0.5 text-[11px] font-bold text-slate-700">
+                    {copied === "phone" ? "Copied ✓" : "Copy"}
+                  </button>
+                </dd>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-3">
               <dt className="text-slate-500">Amount</dt>
               <dd className="font-bold">{rupee(amount)}</dd>

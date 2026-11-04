@@ -1,13 +1,13 @@
 "use client";
 
-import { mmss, useUpiQr } from "@/app/_components/upiQr";
+import { mmss, spacedPhone, useUpiQr } from "@/app/_components/upiQr";
 import { rupee } from "@/lib/money";
 import { Qr } from "./Qr";
 
 /* Counter screen: a QR the customer scans with any UPI app to pay `amount`. It renews every few minutes (the
    shop sets how many in Settings). The shop's UPI account can't tell the app a payment arrived, so staff look
    in their UPI app before completing the bill. */
-export function UpiQrCard({ upi, amount, shop, label }: { upi: { id: string; name: string; minutes: number }; amount: number; shop: string; label: string }) {
+export function UpiQrCard({ upi, amount, shop, label }: { upi: { id: string; name: string; minutes: number; phone?: string }; amount: number; shop: string; label: string }) {
   const { link, ref, left, ready } = useUpiQr(upi, amount, shop, "POS");
   return (
     <div className="mt-3 flex flex-wrap items-center gap-4 rounded-2xl bg-slate-50 p-4">
@@ -25,6 +25,11 @@ export function UpiQrCard({ upi, amount, shop, label }: { upi: { id: string; nam
         <p className="truncate">
           Pays to <b className="text-slate-800">{upi.id}</b>
         </p>
+        {upi.phone && (
+          <p>
+            Or the customer can pay to the GPay number <b className="adm-num text-slate-800">{spacedPhone(upi.phone)}</b>
+          </p>
+        )}
         <p className="text-[11.5px] text-slate-400">Check your UPI app for the payment, then complete the bill.</p>
       </div>
     </div>

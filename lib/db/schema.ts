@@ -2,7 +2,7 @@ import { bigint, boolean, index, integer, jsonb, numeric, pgTable, text, uniqueI
 import { sql } from "drizzle-orm";
 import type { Audit, CampaignType, LedgerType, LoyaltyStatus, Segment, VoucherSource, VoucherStatus } from "../loyalty/types";
 import type { LoyaltyConfig, RewardKind, TierKey } from "../loyalty/config";
-import type { BillSource, CouponSource, DiscountType, IngredientMoveType, IngredientUnit, OrderItem, OrderSource, OrderStatus, PayMethod, SessionStatus, StockMoveType } from "../types";
+import type { BillSource, UpiChannel, CouponSource, DiscountType, IngredientMoveType, IngredientUnit, OrderItem, OrderSource, OrderStatus, PayMethod, SessionStatus, StockMoveType } from "../types";
 
 /* One database table per type in lib/types.ts. Ids stay the app's own short text ids and
    timestamps stay epoch milliseconds, so rows map 1:1 onto the shapes the UI
@@ -43,6 +43,8 @@ export const settings = pgTable("settings", {
   /** the shop's UPI ID (name@bank) that guests pay to, the name shown in their UPI app, and how long one QR stays up before a fresh one replaces it */
   upiId: text("upi_id").notNull().default(""),
   upiName: text("upi_name").notNull().default(""),
+  /** the shop's GPay / PhonePe mobile number — shown as another way to pay (blank = not shown) */
+  upiPhone: text("upi_phone").notNull().default(""),
   upiQrMinutes: integer("upi_qr_minutes").notNull().default(5),
 });
 
@@ -150,6 +152,8 @@ export const bills = pgTable(
     cashAmount: money("cash_amount").notNull().default(0),
     upiAmount: money("upi_amount").notNull().default(0),
     cardAmount: money("card_amount").notNull().default(0),
+    /** how the UPI part reached the shop: counter QR, WhatsApp link, guest's phone, GPay number… */
+    upiChannel: text("upi_channel").$type<UpiChannel | "">().notNull().default(""),
     received: money("received").notNull(),
     change: money("change").notNull().default(0),
     status: text("status").$type<"completed" | "void">().notNull(),

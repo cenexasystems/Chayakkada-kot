@@ -8,7 +8,7 @@ import { batches, bills, coupons, expenseCategories, expenses, ingredientMoves, 
 import * as L from "./loyalty/server";
 import { pointsPerUnit } from "./loyalty/engine";
 import type { LoyaltyConfig } from "./loyalty/config";
-import { INGREDIENT_UNITS, type AdminState, type Coupon, Bill, Ingredient, IngredientLedger, IngredientMove, IngredientMoveType, IngredientUnit, StockLedger, MenuItem, Order, OrderItem, OrderStatus, PayMethod, Product, PublicUser, Recipe, RecipeItem, Session, StaffUser, StockMoveType, TabClose, TabView, ShopDetails } from "./types";
+import { INGREDIENT_UNITS, UPI_CHANNELS, type AdminState, type Coupon, type UpiChannel, Bill, Ingredient, IngredientLedger, IngredientMove, IngredientMoveType, IngredientUnit, StockLedger, MenuItem, Order, OrderItem, OrderStatus, PayMethod, Product, PublicUser, Recipe, RecipeItem, Session, StaffUser, StockMoveType, TabClose, TabView, ShopDetails } from "./types";
 
 /* Every read/write the app makes, with validation. Route handlers are thin wrappers.
    Writes run inside store.mutate(), which serializes them and rolls back on error. */
@@ -153,7 +153,7 @@ async function view(q: Q, phone: string): Promise<TabView> {
           name: s.customerName.split(" ")[0] ?? "",
           coupon: cp ? { code: cp.code, percent: cp.percent, discount, ok: !!check?.ok, reason: check && !check.ok ? check.reason : "" } : null,
           payable: round2(Math.max(0, total - discount)),
-          upi: st?.upiId ? { id: st.upiId, name: st.upiName || name, minutes: st.upiQrMinutes } : null,
+          upi: st?.upiId ? { id: st.upiId, name: st.upiName || name, minutes: st.upiQrMinutes, phone: st.upiPhone } : null,
           approved: s.billApprovedAt ? { amount: s.approvedAmount, at: s.billApprovedAt } : null,
           payClaim: s.payClaimedAt ? { amount: s.payClaimedAmount, at: s.payClaimedAt } : null,
         }
@@ -296,8 +296,8 @@ export function applyCoupon(raw: unknown, couponRaw: unknown) {
 
 /** What the public payment page needs: who is being paid, and how. */
 export async function payPageInfo() {
-  const r = await first(db.select({ n: settings.shopName, logo: settings.logoUrl, id: settings.upiId, pn: settings.upiName, m: settings.upiQrMinutes, url: settings.publicUrl }).from(settings).where(eq(settings.id, 1)));
-  return { shopName: r?.n ?? "Cafe", logoUrl: logoLink(r?.logo ?? ""), upi: r?.id ? { id: r.id, name: r.pn || (r.n ?? "Cafe"), minutes: r.m ?? 5 } : null, publicUrl: (r?.url ?? "").replace(/\/+$/, "") };
+  const r = await first(db.select({ n: settings.shopName, logo: settings.logoUrl, id: settings.upiId, pn: settings.upiName, ph: settings.upiPhone, m: settings.upiQrMinutes, url: settings.publicUrl }).from(settings).where(eq(settings.id, 1)));
+  return { shopName: r?.n ?? "Cafe", logoUrl: logoLink(r?.logo ?? ""), upi: r?.id ? { id: r.id, name: r.pn || (r.n ?? "Cafe"), minutes: r.m ?? 5, phone: r.ph ?? "" } : null, publicUrl: (r?.url ?? "").replace(/\/+$/, "") };
 }
 
 /** What a guest owes on their open tab right now: their orders, less the coupon they applied. */
@@ -395,6 +395,7 @@ export async function adminState(): Promise<AdminState> {
       orderingEnabled: st[0]?.orderingEnabled ?? true,
       upiId: st[0]?.upiId ?? "",
       upiName: st[0]?.upiName ?? "",
+      upiPhone: st[0]?.upiPhone ?? "",
       upiQrMinutes: st[0]?.upiQrMinutes ?? 5,
     },
     products: prods.map((p) => ({ ...p, image: imgLink(p.id, p.updatedAt, p.image) })),
@@ -836,6 +837,7 @@ async function createBill(tx: Tx, a: Args, actor = "admin"): Promise<Bill> {
       cashAmount,
       upiAmount,
       cardAmount,
+      upiChannel: upiAmount > 0 ? upiChannelOf(a.upiChannel) : "",
       received,
       change: round2(received - calc.total),
       status: "completed",
@@ -958,6 +960,9 @@ const shopClock = (at: number) => new Intl.DateTimeFormat("en-GB", { timeZone: T
     out for items whose quantity changed. Items and amounts of a bill that earned or used loyalty
     points can't be edited — void it and bill again — and nothing on a voided bill's amounts can.
     Throws if the edit isn't allowed. */
+/** The way a UPI payment arrived, if it is one we know ("" otherwise). */
+const upiChannelOf = (v: unknown): UpiChannel | "" => UPI_CHANNELS.find((c) => c.key === v)?.key ?? "";
+
 export function billEditPatch(b: Bill, a: Args) {
   const patch: Partial<typeof bills.$inferInsert> = {};
   const deltas = new Map<string, number>();
@@ -1068,6 +1073,10 @@ export function billEditPatch(b: Bill, a: Args) {
       }
     }
   }
+  // how the UPI part arrived: kept only while something is paid by UPI
+  const upiNow = (patch.upiAmount ?? b.upiAmount) > 0;
+  const channel = upiNow ? (a.upiChannel !== undefined ? upiChannelOf(a.upiChannel) : b.upiChannel) : "";
+  if (channel !== b.upiChannel) patch.upiChannel = channel;
   return { patch, deltas };
 }
 
@@ -1140,6 +1149,12 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
           patch.upiId = v;
         }
         if (a.upiName !== undefined) patch.upiName = str(a.upiName, 60);
+        if (a.upiPhone !== undefined) {
+          const raw = str(a.upiPhone, 24);
+          const v = raw ? mobile(raw) : "";
+          if (v === null || (raw && !v)) throw new ApiError("The GPay number should be a 10-digit mobile number.");
+          patch.upiPhone = v;
+        }
         if (a.upiQrMinutes !== undefined) patch.upiQrMinutes = int(a.upiQrMinutes, 1, 30, 5);
         if (a.ownerName !== undefined) patch.ownerName = str(a.ownerName, 80);
         if (a.location !== undefined) patch.location = str(a.location, 120);

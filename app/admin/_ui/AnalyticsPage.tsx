@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Bill } from "@/lib/types";
+import { UPI_CHANNELS, type Bill } from "@/lib/types";
 import { round2, rupee, shopToday } from "@/lib/money";
 import { completedIn, customerStats, expensesIn, gstReport, isoWeek, itemStats, monthly, rangeOf, splitGst, startOfWeek, paymentStats, summary, weekly, type Period } from "@/lib/analytics";
 import Link from "next/link";
@@ -928,6 +928,12 @@ function RevenueBreakdown({ bills, periodLabel }: { bills: Bill[]; periodLabel: 
   ];
   const d2 = (d: string) => d.split("-").reverse().join("/");
 
+  // UPI split by how it reached the shop (WhatsApp link, counter QR, guest's phone…); bills from before this was recorded are "not recorded"
+  const upiBy = UPI_CHANNELS.map((c) => ({ label: c.label, amount: round2(bills.filter((b) => b.upiChannel === c.key).reduce((n, b) => n + b.upiAmount, 0)), n: bills.filter((b) => b.upiChannel === c.key && b.upiAmount > 0).length }));
+  const upiUnknown = round2(bills.filter((b) => !b.upiChannel).reduce((n, b) => n + b.upiAmount, 0));
+  const upiUnknownN = bills.filter((b) => !b.upiChannel && b.upiAmount > 0).length;
+  const upiRows = [...upiBy, { label: "Not recorded (older bills)", amount: upiUnknown, n: upiUnknownN }].filter((r) => r.amount > 0);
+
   const exportExcel = () =>
     downloadExcel(`revenue-by-payment-${periodLabel}-${new Date().toISOString().slice(0, 10)}`, [
       {
@@ -935,6 +941,7 @@ function RevenueBreakdown({ bills, periodLabel }: { bills: Bill[]; periodLabel: 
         rows: [
           ["Payment", "Amount", "Bills"],
           ...rows.map((r) => [r.label, r.amount, r.n]),
+          ...upiRows.map((r) => ["   UPI · " + r.label, r.amount, r.n]),
           ["Total revenue", total, bills.length],
           [],
           ["Coupon discounts given", couponOff, couponBills],
@@ -964,6 +971,21 @@ function RevenueBreakdown({ bills, periodLabel }: { bills: Bill[]; periodLabel: 
             </li>
           ))}
         </ul>
+        {upiRows.length > 0 && (
+          <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/50 px-4 py-2.5 text-[12.5px]">
+            <p className="mb-1 font-bold text-violet-900">UPI — how it came in</p>
+            <ul className="space-y-0.5">
+              {upiRows.map((r) => (
+                <li key={r.label} className="flex justify-between text-slate-700">
+                  <span>{r.label}</span>
+                  <span className="adm-num font-semibold">
+                    {rupee(r.amount)} <span className="font-normal text-slate-400">· {r.n} bill{r.n === 1 ? "" : "s"}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="mt-3 flex items-center justify-between rounded-xl bg-amber-50 px-4 py-2.5 text-[13px]">
           <span className="font-bold text-amber-900">Coupons — discount given</span>
           <span className="adm-num font-extrabold text-amber-900">

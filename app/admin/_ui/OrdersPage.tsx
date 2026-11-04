@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import type { Bill, Coupon } from "@/lib/types";
+import { UPI_CHANNELS, type Bill, type Coupon, type UpiChannel } from "@/lib/types";
 import { computeBill, payLabel, payParts, round2, rupee, shopToday } from "@/lib/money";
 import { inRange, rangeOf, type Period } from "@/lib/analytics";
 import { useAdmin } from "./Store";
@@ -105,8 +105,8 @@ export default function OrdersPage() {
 
   /* The bills on screen as an Excel workbook with real columns. */
   const exportRows = (): (string | number)[][] => [
-    ["Invoice", "Type", "Customer", "Mobile", "Items", "Subtotal", "Coupon", "Coupon discount", "Manual discount", "Extra", "Bill type", "GST %", "Taxable amount", "GST amount", "Total", "Payment", "Cash", "UPI", "Card", "Status", "Date", "Time", "Reward", "Reward discount", "Points redeemed", "Points discount", "Points earned"],
-    ...bills.map((b) => [b.invoiceNo, b.source, b.customerName, b.customerPhone, b.itemCount, b.subtotal, b.couponCode ?? "", b.couponDiscount, b.manualDiscount, b.extra, b.isGst ? "GST" : "Non-GST", b.gstPercent, b.taxableAmount, b.gstAmount, b.total, b.payment, b.cashAmount, b.upiAmount, b.cardAmount, b.status, fmtDate(b.createdAt), fmtTime(b.createdAt), b.rewardName ?? "", b.rewardDiscount, b.pointsRedeemed, b.pointsDiscount, b.pointsEarned]),
+    ["Invoice", "Type", "Customer", "Mobile", "Items", "Subtotal", "Coupon", "Coupon discount", "Manual discount", "Extra", "Bill type", "GST %", "Taxable amount", "GST amount", "Total", "Payment", "UPI came through", "Cash", "UPI", "Card", "Status", "Date", "Time", "Reward", "Reward discount", "Points redeemed", "Points discount", "Points earned"],
+    ...bills.map((b) => [b.invoiceNo, b.source, b.customerName, b.customerPhone, b.itemCount, b.subtotal, b.couponCode ?? "", b.couponDiscount, b.manualDiscount, b.extra, b.isGst ? "GST" : "Non-GST", b.gstPercent, b.taxableAmount, b.gstAmount, b.total, b.payment, UPI_CHANNELS.find((c) => c.key === b.upiChannel)?.label ?? "", b.cashAmount, b.upiAmount, b.cardAmount, b.status, fmtDate(b.createdAt), fmtTime(b.createdAt), b.rewardName ?? "", b.rewardDiscount, b.pointsRedeemed, b.pointsDiscount, b.pointsEarned]),
   ];
   const stamp = () => new Date().toISOString().slice(0, 10);
   const exportExcel = () => downloadExcel(`bills-${stamp()}.xlsx`, [{ name: "Bills", rows: exportRows() }]);
@@ -482,6 +482,7 @@ function EditBill({ b, admin, onClose, onSaved }: { b: Bill; admin: boolean; onC
     cashAmount: b.cashAmount ? String(b.cashAmount) : "",
     upiAmount: b.upiAmount ? String(b.upiAmount) : "",
     cardAmount: b.cardAmount ? String(b.cardAmount) : "",
+    upiChannel: (b.upiChannel || "counter_qr") as UpiChannel,
     manualType: b.manualType as string,
     manualValue: b.manualValue ? String(b.manualValue) : "",
     extra: b.extra ? String(b.extra) : "",
@@ -517,6 +518,7 @@ function EditBill({ b, admin, onClose, onSaved }: { b: Bill; admin: boolean; onC
       cashAmount: f.cashAmount,
       upiAmount: f.upiAmount,
       cardAmount: f.cardAmount,
+      ...(f.payment === "upi" || (split && Number(f.upiAmount) > 0) ? { upiChannel: f.upiChannel } : {}),
       ...(amountsLocked ? {} : { items: clean, manualType: f.manualType, manualValue: f.manualValue, extra: f.extra, isGst: f.isGst, gstPercent: f.gstPercent }),
     });
     setBusy(false);
@@ -659,6 +661,17 @@ function EditBill({ b, admin, onClose, onSaved }: { b: Bill; admin: boolean; onC
               <option value="split">Split (two or more)</option>
             </select>
           </Field>
+          {(f.payment === "upi" || (split && Number(f.upiAmount) > 0)) && (
+            <Field label="UPI payment came through">
+              <select className={inputCls} disabled={b.status !== "completed"} value={f.upiChannel} onChange={(e) => setF({ ...f, upiChannel: e.target.value as UpiChannel })}>
+                {UPI_CHANNELS.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           {split && (
             <div className="space-y-2">
               <div className="grid grid-cols-3 gap-2">

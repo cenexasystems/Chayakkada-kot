@@ -27,7 +27,10 @@ const subscribe = (cb: () => void) => {
   return () => clearInterval(t);
 };
 
-export function useUpiQr(upi: { id: string; name: string; minutes: number }, amount: number, shop: string, tag: string) {
+/** 9876543210 -> "98765 43210", easier to read out and to type */
+export const spacedPhone = (p: string) => (/^\d{10}$/.test(p) ? `${p.slice(0, 5)} ${p.slice(5)}` : p);
+
+export function useUpiQr(upi: { id: string; name: string; minutes: number; phone?: string }, amount: number, shop: string, tag: string) {
   const now = useSyncExternalStore(subscribe, snapshot, () => 0);
   const ready = now > 0;
   const period = Math.max(1, upi.minutes) * 60_000;

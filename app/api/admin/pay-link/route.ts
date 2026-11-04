@@ -16,6 +16,6 @@ export async function POST(req: Request) {
     if (!info.upi) throw new ApiError("Add the shop's UPI ID in Settings first.");
     const base = info.publicUrl || new URL(req.url).origin;
     const name = typeof b.name === "string" ? b.name : "";
-    return { url: `${base}/pay/${signPayLink(amount, name)}`, upiId: info.upi.id, upiName: info.upi.name, shopName: info.shopName };
+    return { url: `${base}/pay/${signPayLink(amount, name)}`, upiId: info.upi.id, upiName: info.upi.name, upiPhone: info.upi.phone, shopName: info.shopName };
   });
 }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { TabView } from "@/lib/types";
 import { rupee } from "@/lib/money";
 import { Qr } from "../admin/_ui/Qr";
-import { mmss, useUpiQr } from "./upiQr";
+import { mmss, spacedPhone, useUpiQr } from "./upiQr";
 
 type Tab = NonNullable<TabView["tab"]>;
 
@@ -19,7 +19,7 @@ export function UpiPay({ tab, shop, phone, onView }: { tab: Tab; shop: string; p
   const amount = approved?.amount ?? tab.payable;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState("");
   const { link, ref, left, ready } = useUpiQr(upi, amount, shop, `T${phone.slice(-4)}`);
 
   const claim = tab.payClaim;
@@ -39,11 +39,11 @@ export function UpiPay({ tab, shop, phone, onView }: { tab: Tab; shop: string; p
       setBusy(false);
     }
   };
-  const copy = async () => {
+  const copy = async (what: string, v: string) => {
     try {
-      await navigator.clipboard.writeText(upi.id);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(v);
+      setCopied(what);
+      setTimeout(() => setCopied(""), 2000);
     } catch {}
   };
 
@@ -71,9 +71,18 @@ export function UpiPay({ tab, shop, phone, onView }: { tab: Tab; shop: string; p
         Pay to <b>{upi.name}</b>
         <br />
         UPI ID <b>{upi.id}</b>{" "}
-        <button type="button" onClick={copy}>
-          {copied ? "Copied ✓" : "Copy"}
+        <button type="button" onClick={() => copy("id", upi.id)}>
+          {copied === "id" ? "Copied ✓" : "Copy"}
         </button>
+        {upi.phone && (
+          <>
+            <br />
+            Or GPay number <b>{spacedPhone(upi.phone)}</b>{" "}
+            <button type="button" onClick={() => copy("phone", upi.phone)}>
+              {copied === "phone" ? "Copied ✓" : "Copy"}
+            </button>
+          </>
+        )}
       </p>
       {claimedFull ? (
         <div className="tm-upi__done">
