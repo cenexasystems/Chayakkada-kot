@@ -1088,7 +1088,7 @@ async function requestApproval(tx: Tx, op: string, a: Args, role: string, now: n
   return { pendingApproval: true, request: x };
 }
 
-async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<unknown> {
+export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<unknown> {
   {
     const now = Date.now();
     const id = str(a.id, 40);
@@ -1654,8 +1654,9 @@ async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<unknown
         if (b.status === "completed") {
           await restock(tx, b.items, { type: "void_bill", ref: b.invoiceNo, note: "Bill deleted" });
           if (b.couponCode) await tx.update(coupons).set({ used: sql`greatest(0, ${coupons.used} - 1)` }).where(eq(coupons.code, b.couponCode));
-          await L.reverseBill(tx, b, role, 1, "Bill deleted");
         }
+        // points, stamps, rewards and referrals go back to how they were, and every loyalty record of this bill is erased
+        await L.purgeBill(tx, b, role);
         await tx.delete(bills).where(eq(bills.id, b.id));
         return null;
       }

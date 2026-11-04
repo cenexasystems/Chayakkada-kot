@@ -13,7 +13,7 @@
    - Nothing here trusts amounts from the browser: points, values and eligibility are
      recomputed from the database. */
 
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, lt, lte, ne, or, sql, ilike } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, like, lt, lte, ne, or, sql, ilike } from "drizzle-orm";
 import { db, type Db, type Tx } from "../db";
 import { bills, loyaltyAudit, loyaltyCampaigns, loyaltyCustomers, loyaltyLedger, loyaltyLots, loyaltyReferrals, loyaltyRewards, loyaltySettings, loyaltyStamps, loyaltyVouchers, products, settings } from "../db/schema";
 import { ApiError } from "../store";
@@ -604,7 +604,7 @@ export async function reverseBill(tx: Tx, bill: Pick<Bill, "id" | "invoiceNo" | 
       if (size && c.stamps > 0) {
         const pos = ((c.stamps - 1) % size) + 1;
         const cycle = Math.floor((c.stamps - 1) / size);
-        await tx.update(loyaltyVouchers).set({ status: "cancelled", note: `Visit stamp reversed (${bill.invoiceNo})` }).where(and(eq(loyaltyVouchers.key, `ms:${c.id}:${cycle}:${pos}`), eq(loyaltyVouchers.status, "issued")));
+        await tx.update(loyaltyVouchers).set({ status: "cancelled", key: null, note: `Visit stamp reversed (${bill.invoiceNo})` }).where(and(eq(loyaltyVouchers.key, `ms:${c.id}:${cycle}:${pos}`), eq(loyaltyVouchers.status, "issued")));
       }
       // free the visit key, so another bill on the same visit can still earn the stamp
       await tx.update(loyaltyStamps).set({ status: "reversed", visitKey: `${stamp.visitKey}:reversed:${stamp.id}` }).where(eq(loyaltyStamps.id, stamp.id));
@@ -623,6 +623,69 @@ export async function reverseBill(tx: Tx, bill: Pick<Bill, "id" | "invoiceNo" | 
   }
   await audit(tx, actor, full ? "bill.reverse" : "bill.partial_refund", { customerId: c.id, ref: bill.invoiceNo, after: { fraction: round2(fraction), pointsTakenBack: take }, reason });
 }
+/** A bill is deleted for good: undo what it did to points, rewards, stamps and referrals (so balances are
+    right), then erase every record that mentions it — the points it earned, the "taken back" correction,
+    the reversed stamp, the cancelled reward, the audit lines — so nothing about it is left behind. */
+export async function purgeBill(tx: Tx, bill: Pick<Bill, "id" | "invoiceNo" | "total" | "loyaltyCustomerId" | "status">, actor: string) {
+  if (!bill.loyaltyCustomerId) return;
+  if (bill.status === "completed") await reverseBill(tx, bill, actor, 1, "Bill deleted");
+  await wipeBillTraces(tx, bill.id, bill.invoiceNo);
+}
+
+/** Erases the loyalty records that belong to one bill. A member's points rows are only erased when they cancel
+    out exactly (earned = taken back, spent = returned), so balances and lifetime totals stay right; if a refund
+    ever had to be recorded as debt, those rows are kept. */
+export async function wipeBillTraces(tx: Tx, billId: string, invoiceNo: string | null) {
+  const rows = await tx.select().from(loyaltyLedger).where(eq(loyaltyLedger.billId, billId));
+  const net = new Map<string, number>();
+  for (const r of rows) net.set(r.customerId, (net.get(r.customerId) ?? 0) + r.points);
+  const now = Date.now();
+  let erased = 0;
+  for (const [customerId, n] of net) {
+    if (n !== 0) continue; // doesn't cancel out (a refund became debt): keep these rows
+    const ids = rows.filter((r) => r.customerId === customerId).map((r) => r.id);
+    /* Points are used oldest-expiry first, so a "taken back" row may have used up OTHER lots, not the one
+       this bill created. Erasing the bill's lots would then lose track of those points — so what is left
+       in the bill's own lots goes back into the lots it was taken from. */
+    const mine = await tx.select().from(loyaltyLots).where(inArray(loyaltyLots.ledgerId, ids));
+    const owed = mine.reduce((a, l) => a + l.remaining, 0);
+    const others = (await tx.select().from(loyaltyLots).where(eq(loyaltyLots.customerId, customerId)))
+      .filter((l) => !ids.includes(l.ledgerId) && l.points > l.remaining && (l.expiresAt === null || l.expiresAt >= now))
+      .sort((x, y) => (x.expiresAt ?? Infinity) - (y.expiresAt ?? Infinity) || x.earnedAt - y.earnedAt);
+    if (others.reduce((a, l) => a + (l.points - l.remaining), 0) < owed) continue; // can't put them back cleanly: keep these rows
+    let left = owed;
+    for (const l of others) {
+      if (!left) break;
+      const add = Math.min(left, l.points - l.remaining);
+      await tx.update(loyaltyLots).set({ remaining: l.remaining + add }).where(eq(loyaltyLots.id, l.id));
+      left -= add;
+    }
+    await tx.delete(loyaltyLots).where(inArray(loyaltyLots.ledgerId, ids));
+    await tx.delete(loyaltyLedger).where(inArray(loyaltyLedger.id, ids));
+    erased += ids.length;
+  }
+  await tx.delete(loyaltyStamps).where(and(eq(loyaltyStamps.billId, billId), eq(loyaltyStamps.status, "reversed")));
+  await tx.delete(loyaltyVouchers).where(and(eq(loyaltyVouchers.billId, billId), eq(loyaltyVouchers.status, "cancelled")));
+  if (invoiceNo) {
+    await tx.delete(loyaltyVouchers).where(and(eq(loyaltyVouchers.status, "cancelled"), like(loyaltyVouchers.note, `%(${invoiceNo})%`)));
+    await tx.delete(loyaltyAudit).where(and(eq(loyaltyAudit.ref, invoiceNo), inArray(loyaltyAudit.action, ["bill.reverse", "bill.partial_refund"])));
+  }
+  // a referral this bill had qualified goes back to waiting for the friend's next first bill
+  await tx.update(loyaltyReferrals).set({ status: "pending", billId: null, referrerPoints: 0, refereePoints: 0, rewardedAt: null }).where(and(eq(loyaltyReferrals.billId, billId), eq(loyaltyReferrals.status, "reversed")));
+  return erased;
+}
+
+/** Clears the loyalty records of bills that were deleted before this tidy-up existed. Only records whose bill is
+    gone are touched, and only when they cancel out. Returns how many points rows were erased. */
+export async function purgeOrphans(tx: Tx) {
+  const gone = await tx.execute(sql`
+    select distinct l.bill_id as id, l.invoice_no as inv from ${loyaltyLedger} l
+    where l.bill_id is not null and not exists (select 1 from ${bills} b where b.id = l.bill_id)`);
+  let n = 0;
+  for (const r of gone.rows as { id: string; inv: string | null }[]) n += (await wipeBillTraces(tx, r.id, r.inv)) ?? 0;
+  return n;
+}
+
 const debtOf = (desc: string) => Number(/— (\d+) pts already spent/.exec(desc)?.[1] ?? 0);
 
 /* ================================ admin actions ================================ */
@@ -722,6 +785,7 @@ export async function grant(tx: Tx, a: Args, actor: string) {
 export async function maintain(tx: Tx) {
   const cfg = await getConfig(tx);
   const now = Date.now();
+  await purgeOrphans(tx);
   const due = await tx.selectDistinct({ id: loyaltyLots.customerId }).from(loyaltyLots).where(and(gt(loyaltyLots.remaining, 0), isNotNull(loyaltyLots.expiresAt), lt(loyaltyLots.expiresAt, now)));
   let expired = 0;
   for (const { id } of due) {

@@ -26,7 +26,7 @@ export default function LoyaltyPage() {
 
   // housekeeping (expire due points, birthday rewards) once a day per browser
   useEffect(() => {
-    const k = "clc-loyalty-maintain";
+    const k = "clc-loyalty-maintain-2"; // bumped so the tidy-up of earlier deleted bills runs once
     const today = shopDate(Date.now());
     try {
       if (localStorage.getItem(k) === today) return;
