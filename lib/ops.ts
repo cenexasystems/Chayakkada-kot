@@ -154,6 +154,7 @@ async function view(q: Q, phone: string): Promise<TabView> {
           coupon: cp ? { code: cp.code, percent: cp.percent, discount, ok: !!check?.ok, reason: check && !check.ok ? check.reason : "" } : null,
           payable: round2(Math.max(0, total - discount)),
           upi: st?.upiId ? { id: st.upiId, name: st.upiName || name, minutes: st.upiQrMinutes } : null,
+          approved: s.billApprovedAt ? { amount: s.approvedAmount, at: s.billApprovedAt } : null,
           payClaim: s.payClaimedAt ? { amount: s.payClaimedAmount, at: s.payClaimedAt } : null,
         }
       : null,
@@ -232,7 +233,8 @@ async function addOrder(tx: Tx, a: Args, opts: { fromCustomer: boolean }): Promi
         .returning();
     }
   }
-  [s] = await tx.update(sessions).set({ billRequestedAt: null }).where(eq(sessions.id, s.id)).returning();
+  // more on the tab: an earlier approval or "I've paid" no longer matches what is owed
+  [s] = await tx.update(sessions).set({ billRequestedAt: null, ...{ billApprovedAt: null, approvedAmount: 0, payClaimedAt: null, payClaimedAmount: 0, payClaimedRef: "" } }).where(eq(sessions.id, s.id)).returning();
 
   const [seq] = await tx.update(meta).set({ orderSeq: sql`${meta.orderSeq} + 1` }).where(eq(meta.id, 1)).returning({ n: meta.orderSeq });
   const [o] = await tx
@@ -287,9 +289,15 @@ export function applyCoupon(raw: unknown, couponRaw: unknown) {
     const sub = round2(live.reduce((a, o) => a + o.subtotal, 0));
     const ok = checkCoupon(cp, sub, phone, await L.isMember(tx, phone));
     if (!ok.ok) throw new ApiError(`Coupon ${cp.code}: ${ok.reason}.`);
-    await tx.update(sessions).set({ couponCode: cp.code }).where(eq(sessions.id, s.id));
+    await tx.update(sessions).set({ couponCode: cp.code, ...{ billApprovedAt: null, approvedAmount: 0, payClaimedAt: null, payClaimedAmount: 0, payClaimedRef: "" } }).where(eq(sessions.id, s.id));
     return phone;
   }).then(async (phone) => ({ view: await tabView(phone) }));
+}
+
+/** What the public payment page needs: who is being paid, and how. */
+export async function payPageInfo() {
+  const r = await first(db.select({ n: settings.shopName, logo: settings.logoUrl, id: settings.upiId, pn: settings.upiName, m: settings.upiQrMinutes, url: settings.publicUrl }).from(settings).where(eq(settings.id, 1)));
+  return { shopName: r?.n ?? "Cafe", logoUrl: logoLink(r?.logo ?? ""), upi: r?.id ? { id: r.id, name: r.pn || (r.n ?? "Cafe"), minutes: r.m ?? 5 } : null, publicUrl: (r?.url ?? "").replace(/\/+$/, "") };
 }
 
 /** What a guest owes on their open tab right now: their orders, less the coupon they applied. */
@@ -312,7 +320,8 @@ export function payClaim(raw: unknown, refRaw: unknown) {
     const phone = phoneOf(raw);
     const s = await openSession(tx, phone);
     if (!s) throw new ApiError("There's nothing on your tab yet.");
-    const amount = await payableOf(tx, s);
+    if (!s.billApprovedAt) throw new ApiError("The counter hasn't approved your bill yet — your payment QR appears once they have.");
+    const amount = s.approvedAmount;
     if (!(amount > 0)) throw new ApiError("There's nothing to pay yet.");
     const now = Date.now();
     await tx
@@ -337,7 +346,7 @@ export function removeCoupon(raw: unknown) {
   return mutate(async (tx) => {
     const phone = phoneOf(raw);
     const s = await openSession(tx, phone);
-    if (s) await tx.update(sessions).set({ couponCode: null }).where(eq(sessions.id, s.id));
+    if (s) await tx.update(sessions).set({ couponCode: null, ...{ billApprovedAt: null, approvedAmount: 0, payClaimedAt: null, payClaimedAmount: 0, payClaimedRef: "" } }).where(eq(sessions.id, s.id));
     return phone;
   }).then(async (phone) => ({ view: await tabView(phone) }));
 }
@@ -1200,6 +1209,19 @@ async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<unknown
       }
 
       /* ---------- tabs ---------- */
+      case "tab.approve": {
+        // staff set the final amount at billing (discounts, GST, extra charges) and approve it: the guest's phone now shows the payment QR for exactly this
+        const s = await must(tx.select().from(sessions).where(and(eq(sessions.id, id), eq(sessions.status, "open"))), "Tab");
+        const amount = round2(num(a.amount));
+        if (!(amount > 0 && amount <= 10_000_000)) throw new ApiError("Enter a bill amount to approve.");
+        const [x] = await tx.update(sessions).set({ billApprovedAt: now, approvedAmount: amount, billRequestedAt: s.billRequestedAt ?? now, payClaimedAt: null, payClaimedAmount: 0, payClaimedRef: "" }).where(eq(sessions.id, s.id)).returning();
+        return x;
+      }
+      case "tab.unapprove": {
+        const s = await must(tx.select().from(sessions).where(and(eq(sessions.id, id), eq(sessions.status, "open"))), "Tab");
+        await tx.update(sessions).set({ billApprovedAt: null, approvedAmount: 0, payClaimedAt: null, payClaimedAmount: 0, payClaimedRef: "" }).where(eq(sessions.id, s.id));
+        return null;
+      }
       case "tab.payclaim.clear": {
         // staff looked in their UPI app and the money isn't there: take the guest's "I've paid" off the tab
         const s = await must(tx.select().from(sessions).where(and(eq(sessions.id, id), eq(sessions.status, "open"))), "Tab");

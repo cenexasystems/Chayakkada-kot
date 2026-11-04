@@ -87,6 +87,9 @@ export const sessions = pgTable(
     couponCode: text("coupon_code"),
     /** the guest tapped "I've paid" after paying by UPI: when, how much, and the QR reference they paid with.
         Nothing is confirmed by this — staff check their UPI app and then bill the tab. */
+    /** staff approved the bill for payment at this final amount — only then does the guest's phone show the payment QR */
+    billApprovedAt: ms("bill_approved_at"),
+    approvedAmount: money("approved_amount").notNull().default(0),
     payClaimedAt: ms("pay_claimed_at"),
     payClaimedAmount: money("pay_claimed_amount").notNull().default(0),
     payClaimedRef: text("pay_claimed_ref").notNull().default(""),

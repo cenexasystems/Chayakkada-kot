@@ -35,6 +35,9 @@ export type Session = {
   billRequestedAt: number | null;
   billId: string | null;
   couponCode: string | null;
+  /** staff approved the bill for payment at this final amount (null until then) */
+  billApprovedAt: number | null;
+  approvedAmount: number;
   /** the guest said they paid by UPI (when, how much, the QR reference) — staff still have to confirm it */
   payClaimedAt: number | null;
   payClaimedAmount: number;
@@ -211,6 +214,8 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   "loyalty.reward.delete": "Removed a reward",
   "loyalty.campaign.save": "Saved a campaign",
   "loyalty.campaign.delete": "Removed a campaign",
+  "tab.approve": "Approved a tab's bill for payment",
+  "tab.unapprove": "Withdrew a tab's bill approval",
   "tab.payclaim.clear": "Marked a guest's UPI payment as not received",
   "approval.approve": "Approved a staff change",
   "approval.reject": "Rejected a staff change",
@@ -521,6 +526,8 @@ export type TabView = {
     payable: number;
     /** where to pay by UPI, when the shop has set it up */
     upi: { id: string; name: string; minutes: number } | null;
+    /** the final amount staff approved — the payment QR shows on the guest's phone only after this */
+    approved: { amount: number; at: number } | null;
     /** the guest has said they paid this much (it is for staff to confirm) */
     payClaim: { amount: number; at: number } | null;
   } | null;

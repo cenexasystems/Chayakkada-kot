@@ -19,7 +19,7 @@ export default async function WalletPage({ params }: { params: Promise<{ token: 
       <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 p-6 text-center">
         <h1 className="mb-1 text-base font-semibold text-slate-900">Wallet not found</h1>
         <p className="mb-5 max-w-sm text-sm text-slate-500">This link isn&apos;t valid any more. Ask at the counter for a fresh one.</p>
-        <Link href="/" className="rounded-md bg-slate-900 px-4 py-2 text-xs font-medium text-white">
+        <Link href="/" className="rounded-md bg-[#2b3022] px-4 py-2 text-xs font-medium text-white">
           See the menu
         </Link>
       </div>
@@ -35,12 +35,12 @@ export default async function WalletPage({ params }: { params: Promise<{ token: 
   const ready = w.vouchers.filter((v) => v.status === "issued");
 
   return (
-    <div className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900">
+    <div className="min-h-screen bg-[#f3f4e1] px-4 py-8 text-slate-900">
       <div className="mx-auto max-w-md space-y-4">
-        <div className="overflow-hidden rounded-3xl bg-slate-900 text-white shadow-xl">
+        <div className="overflow-hidden rounded-3xl bg-[#2b3022] text-white shadow-xl">
           <div className="p-6">
             {w.logoUrl && <img src={w.logoUrl} alt="" style={{ height: 44, width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: 10, display: "block" }} />}
-            <p className="text-[12px] font-extrabold uppercase tracking-[0.2em] text-red-300">{w.shopName} loyalty</p>
+            <p className="text-[12px] font-extrabold uppercase tracking-[0.2em] text-[#c9d3a0]">{w.shopName} loyalty</p>
             <p className="mt-1 text-[18px] font-bold">{c.name}</p>
             <p className="font-mono text-[12px] text-slate-400">{c.code}</p>
             <div className="mt-5 flex items-end justify-between">
@@ -61,7 +61,7 @@ export default async function WalletPage({ params }: { params: Promise<{ token: 
               </div>
             )}
           </div>
-          <p className="bg-red-600 px-6 py-3 text-[12.5px] font-semibold">{tier.benefits}</p>
+          <p className="bg-[#6b7550] px-6 py-3 text-[12.5px] font-semibold">{tier.benefits}</p>
         </div>
         {c.status !== "active" && <p className="rounded-xl bg-amber-50 px-4 py-3 text-[13px] font-semibold text-amber-800">This loyalty account is paused. Ask at the counter.</p>}
 
@@ -70,7 +70,7 @@ export default async function WalletPage({ params }: { params: Promise<{ token: 
             <h2 className="mb-3 text-[14px] font-bold">Visit stamps</h2>
             <div className="flex flex-wrap gap-1.5">
               {Array.from({ length: size }, (_, i) => (
-                <span key={i} className={`grid h-8 w-8 place-items-center rounded-full border-2 text-[11px] font-bold ${i < pos ? "border-red-600 bg-red-600 text-white" : cfg.stamps.milestones.some((m) => m.visits === i + 1) ? "border-amber-400 text-amber-600" : "border-slate-200 text-slate-400"}`}>
+                <span key={i} className={`grid h-8 w-8 place-items-center rounded-full border-2 text-[11px] font-bold ${i < pos ? "border-[#6b7550] bg-[#6b7550] text-white" : cfg.stamps.milestones.some((m) => m.visits === i + 1) ? "border-amber-400 text-amber-600" : "border-slate-200 text-slate-400"}`}>
                   {i + 1}
                 </span>
               ))}
@@ -146,7 +146,7 @@ export default async function WalletPage({ params }: { params: Promise<{ token: 
                       {l.invoiceNo && ` · ${l.invoiceNo}`}
                     </span>
                   </span>
-                  <b className={`shrink-0 ${l.points > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                  <b className={`shrink-0 ${l.points > 0 ? "text-emerald-600" : "text-[#6b7550]"}`}>
                     {l.points > 0 ? "+" : ""}
                     {l.points}
                   </b>
@@ -164,7 +164,7 @@ export default async function WalletPage({ params }: { params: Promise<{ token: 
                 <li key={b.invoiceNo} className="flex justify-between py-2">
                   <span>
                     {date(b.createdAt)} <span className="text-slate-400">· {b.invoiceNo}</span>
-                    {b.status === "void" && <span className="ml-1 text-red-600">(void)</span>}
+                    {b.status === "void" && <span className="ml-1 text-[#6b7550]">(void)</span>}
                   </span>
                   <span className="font-semibold">
                     {rupee(b.total)}

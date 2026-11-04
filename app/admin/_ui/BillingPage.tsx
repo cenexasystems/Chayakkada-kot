@@ -38,7 +38,7 @@ const linesOf = (f: FloorTab): Line[] => {
 };
 
 export default function BillingPage({ sessionId }: { sessionId?: string }) {
-  const { s, floor, act, print, now } = useAdmin();
+  const { s, floor, act, print, now, toast } = useAdmin();
   const shop = s.settings.shopName;
   /* "Walk-ins only" and the ordering toggle both reduce POS to counter walk-ins.
      Either one on → the "Customer tab" mode and its tab picker drop out. */
@@ -145,6 +145,36 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const earns = earnPreview(loyal.lk, items, s.products, calc.subtotal, calc.discount);
   const recv = Number(received) || 0;
   const change = pay === "cash" && recv > 0 ? recv - calc.total : 0;
+
+  /* ---------- asking the customer to pay by UPI ---------- */
+  const upiOn = !!s.settings.upiId;
+  const approved = f?.session.billApprovedAt ? { amount: f.session.approvedAmount, at: f.session.billApprovedAt } : null;
+  const approveBill = () => f && act("tab.approve", { id: f.session.id, amount: calc.total });
+  const withdrawBill = () => f && act("tab.unapprove", { id: f.session.id });
+  /* WhatsApp message with the amount, the UPI ID and a link to the payment page (a QR + "Open my UPI app") */
+  const sendPayLink = async () => {
+    const amount = approved?.amount ?? calc.total;
+    const w = window.open("about:blank", "_blank"); // opened first so the browser doesn't block it
+    try {
+      const r = await fetch("/api/admin/pay-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount, name }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Couldn't make the payment link.");
+      const text = [
+        `Hi ${(name || "there").split(" ")[0]}! Your bill at ${d.shopName} is ${rupee(amount)}.`,
+        "",
+        `Pay by UPI: ${d.url}`,
+        `Pay to: ${d.upiName}`,
+        `UPI ID: ${d.upiId}`,
+        `Amount: ${rupee(amount)}`,
+        "",
+        "After paying, please show the confirmation at the counter.",
+      ].join("\n");
+      if (w) w.location.href = waLink(phone, text);
+    } catch (e) {
+      w?.close();
+      toast({ kind: "err", title: (e as Error).message });
+    }
+  };
 
   /* a split is any mix of cash, UPI and card; each box can take "the rest" in one tap */
   const sCash = Number(splitCash) || 0;
@@ -625,6 +655,42 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               )}
               {s.settings.upiId && (pay === "upi" ? calc.total : pay === "split" ? sUpi : 0) > 0 && (
                 <UpiQrCard upi={{ id: s.settings.upiId, name: s.settings.upiName || shop, minutes: s.settings.upiQrMinutes }} amount={pay === "upi" ? calc.total : sUpi} shop={shop} label={pay === "upi" ? "Scan to pay" : "Scan to pay the UPI part:"} />
+              )}
+              {upiOn && calc.total > 0 && ((mode === "tab" && !!f) || okPhone(phone)) && (
+                <div className="mt-3 space-y-2 rounded-2xl border border-dashed border-slate-300 p-3">
+                  <span className="block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Ask the customer to pay by UPI</span>
+                  {mode === "tab" && f && !approved && (
+                    <>
+                      <Btn kind="dark" className="w-full" onClick={approveBill}>
+                        Approve bill {rupee(calc.total)} · show QR on the guest&apos;s phone
+                      </Btn>
+                      <p className="text-[11.5px] text-slate-500">Their phone shows the QR, UPI ID and this amount as soon as you approve. Set the discount, extra charges and GST first.</p>
+                    </>
+                  )}
+                  {mode === "tab" && f && approved && (
+                    <div className="space-y-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-[12.5px] text-emerald-900">
+                      <p>
+                        <b>Approved {rupee(approved.amount)}</b> — the QR is on the guest&apos;s phone.
+                      </p>
+                      {Math.abs(approved.amount - calc.total) > 0.005 && (
+                        <p className="font-semibold text-amber-800">
+                          The bill now comes to {rupee(calc.total)}.{" "}
+                          <button type="button" className="underline" onClick={approveBill}>
+                            Approve {rupee(calc.total)} instead
+                          </button>
+                        </p>
+                      )}
+                      <button type="button" className="font-bold text-red-700 underline" onClick={withdrawBill}>
+                        Withdraw approval
+                      </button>
+                    </div>
+                  )}
+                  {okPhone(phone) && (
+                    <button type="button" onClick={sendPayLink} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#22c55e] bg-white text-[13px] font-bold text-[#16a34a] hover:bg-emerald-50">
+                      <WaIcon size={16} /> Send payment link on WhatsApp
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 

@@ -37,11 +37,11 @@ export default async function CouponPage({ params, searchParams }: { params: Pro
   const rules = [c.minOrder ? `On orders of ${rupee(c.minOrder)} or more` : "On any order", c.expiresAt ? `Valid till ${ddmmyyyy(c.expiresAt)}` : "No expiry", c.audience === "loyalty" ? "For loyalty members only" : c.audience === "regular" ? "For non-loyalty customers only" : "", c.restricted ? "Only for the mobile number it was sent to" : ""].filter(Boolean);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-slate-100 px-4 py-10 text-slate-900">
-      <div className="w-full max-w-md overflow-hidden rounded-3xl bg-slate-900 text-white shadow-2xl">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#f3f4e1] px-4 py-10 text-slate-900">
+      <div className="w-full max-w-md overflow-hidden rounded-3xl bg-[#2b3022] text-white shadow-2xl">
         <div className="p-7">
           {logoUrl && <img src={logoUrl} alt="" style={{ height: 44, width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: 10, display: "block" }} />}
-          <p className="text-[12px] font-extrabold uppercase tracking-[0.2em] text-red-300">{shopName}</p>
+          <p className="text-[12px] font-extrabold uppercase tracking-[0.2em] text-[#c9d3a0]">{shopName}</p>
           <p className="mt-1 text-[15px] font-semibold text-slate-200">{name ? `A gift for ${name}` : "A gift for you"}</p>
           <p className="mt-3 text-[56px] font-black leading-none">{c.percent}% OFF</p>
           <div className="mt-6 rounded-2xl border-2 border-dashed border-white/40 bg-white/5 py-4 text-center font-mono text-[30px] font-extrabold tracking-[0.12em]">{c.code}</div>
@@ -51,7 +51,7 @@ export default async function CouponPage({ params, searchParams }: { params: Pro
             ))}
           </ul>
         </div>
-        <div className="bg-red-600 px-7 py-4 text-[13.5px] font-semibold">Show this code at billing, or enter it when you order from your phone.</div>
+        <div className="bg-[#6b7550] px-7 py-4 text-[13.5px] font-semibold">Show this code at billing, or enter it when you order from your phone.</div>
       </div>
 
       {st !== "active" && <p className="mt-4 rounded-xl bg-amber-50 px-4 py-2 text-[13px] font-semibold text-amber-800">{DEAD[st]}</p>}

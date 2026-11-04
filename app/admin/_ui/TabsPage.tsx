@@ -18,6 +18,7 @@ const ORDER_BADGE: Record<Order["status"], [BadgeTone, string]> = {
 
 function status(f: FloorTab): { tone: BadgeTone; label: string; bar: string } {
   if (f.session.payClaimedAt) return { tone: "green", label: "Says paid by UPI", bar: "bg-emerald-500" };
+  if (f.session.billApprovedAt) return { tone: "sky", label: "Approved · awaiting UPI", bar: "bg-sky-500" };
   if (f.billRequested) return { tone: "amber", label: "Bill requested", bar: "bg-amber-400" };
   if (f.fresh) return { tone: "red", label: `${f.fresh} new order${f.fresh > 1 ? "s" : ""}`, bar: "bg-red-600" };
   return { tone: "green", label: "Open", bar: "bg-emerald-500" };

@@ -8,20 +8,22 @@ import { mmss, useUpiQr } from "./upiQr";
 
 type Tab = NonNullable<TabView["tab"]>;
 
-/* Pay by UPI from the guest's own tab. The QR (and the "Open my UPI app" button) carry the shop's
-   UPI ID and the exact amount the tab comes to. Every few minutes — the shop sets how many — the QR is
-   replaced by a fresh one with a new reference. The shop's UPI account can't tell the app a payment
-   arrived, so "I've paid" only tells the counter; staff check their own UPI app before billing. */
+/* Pay by UPI from the guest's own tab. Staff set the final amount at billing (discounts, GST…) and approve it;
+   only then does the QR appear here, for exactly that amount, with the shop's UPI ID and name. Every few minutes
+   — the shop sets how many — the QR is replaced by a fresh one. The shop's UPI account can't tell the app a
+   payment arrived, so "I've paid" only tells the counter; staff check their own UPI app before billing. */
 
 export function UpiPay({ tab, shop, phone, onView }: { tab: Tab; shop: string; phone: string; onView: (v: TabView) => void }) {
   const upi = tab.upi!;
+  const approved = tab.approved;
+  const amount = approved?.amount ?? tab.payable;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [copied, setCopied] = useState(false);
-  const { link, ref, left } = useUpiQr(upi, tab.payable, shop, `T${phone.slice(-4)}`);
+  const { link, ref, left, ready } = useUpiQr(upi, amount, shop, `T${phone.slice(-4)}`);
 
   const claim = tab.payClaim;
-  const claimedFull = !!claim && Math.abs(claim.amount - tab.payable) < 0.01;
+  const claimedFull = !!claim && Math.abs(claim.amount - amount) < 0.01;
 
   const call = async (action: "pay.claim" | "pay.unclaim") => {
     setBusy(true);
@@ -45,21 +47,29 @@ export function UpiPay({ tab, shop, phone, onView }: { tab: Tab; shop: string; p
     } catch {}
   };
 
+  if (!approved) {
+    return (
+      <section className="tm-upi" aria-label="Pay by UPI">
+        <h4>Pay by UPI</h4>
+        <p className="tm-upi__hint">The counter is checking your bill. Your payment QR will appear here as soon as they approve it.</p>
+      </section>
+    );
+  }
   return (
     <section className="tm-upi" aria-label="Pay by UPI">
       <h4>
-        Pay <b>{rupee(tab.payable)}</b> by UPI
+        Pay <b>{rupee(amount)}</b> by UPI
       </h4>
-      <a className="tm-upi__open" href={link}>
+      <a className="tm-upi__open" href={ready ? link : undefined} aria-disabled={!ready}>
         Open my UPI app
       </a>
-      <div className="tm-upi__qr">
-        <Qr text={link} className="tm-upi__svg" color="#1f2218" />
-      </div>
+      <div className="tm-upi__qr">{ready ? <Qr text={link} className="tm-upi__svg" color="#1f2218" /> : <div className="tm-upi__svg" style={{ aspectRatio: "1" }} aria-hidden="true" />}</div>
       <p className="tm-upi__hint">
-        On a phone, tap the button. Or scan this QR from another phone. New QR in <b>{mmss(left)}</b>.
+        On a phone, tap the button. Or scan this QR from another phone. New QR in <b>{ready ? mmss(left) : "…"}</b>.
       </p>
       <p className="tm-upi__id">
+        Pay to <b>{upi.name}</b>
+        <br />
         UPI ID <b>{upi.id}</b>{" "}
         <button type="button" onClick={copy}>
           {copied ? "Copied ✓" : "Copy"}
@@ -73,12 +83,9 @@ export function UpiPay({ tab, shop, phone, onView }: { tab: Tab; shop: string; p
           </button>
         </div>
       ) : (
-        <>
-          {claim && <p className="tm-upi__hint">You told us you paid {rupee(claim.amount)}, but your tab is now {rupee(tab.payable)} — pay the difference and tap again.</p>}
-          <button type="button" className="tm-send" disabled={busy} onClick={() => call("pay.claim")}>
-            {busy ? "Telling the counter…" : "I've paid"}
-          </button>
-        </>
+        <button type="button" className="tm-send" disabled={busy || !ready} onClick={() => call("pay.claim")}>
+          {busy ? "Telling the counter…" : "I've paid"}
+        </button>
       )}
       {msg && <p className="tm-upi__err">{msg}</p>}
     </section>
