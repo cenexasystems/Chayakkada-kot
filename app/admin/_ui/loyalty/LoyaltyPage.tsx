@@ -10,10 +10,11 @@ import { BarList, PairColumns, Stat, monthLabel, useLoyaltyState, useStatsByPhon
 import Customers from "./Customers";
 import { Campaigns, Rewards } from "./Programme";
 import Crm from "./Crm";
+import RewardRecords from "./RewardRecords";
 import Reports from "./Reports";
 import SettingsTab from "./Settings";
 
-type Tab = "overview" | "customers" | "rewards" | "campaigns" | "crm" | "reports" | "settings";
+type Tab = "overview" | "customers" | "rewards" | "records" | "campaigns" | "crm" | "reports" | "settings";
 
 /* Loyalty, rewards, membership & CRM. Staff see the member list (look up, enrol, issue
    rewards); everything that changes the programme is the owner's. */
@@ -39,6 +40,7 @@ export default function LoyaltyPage() {
         { v: "overview", t: "Overview" },
         { v: "customers", t: "Members" },
         { v: "rewards", t: "Rewards" },
+        { v: "records", t: "Rewards earned" },
         { v: "campaigns", t: "Campaigns" },
         { v: "crm", t: "Customer CRM" },
         { v: "reports", t: "Reports" },
@@ -63,6 +65,7 @@ export default function LoyaltyPage() {
       {data && tab === "overview" && <Overview d={data} />}
       {data && tab === "customers" && <Customers d={data} reload={reload} />}
       {data && tab === "rewards" && <Rewards d={data} />}
+      {data && tab === "records" && <RewardRecords d={data} />}
       {data && tab === "campaigns" && <Campaigns d={data} />}
       {data && tab === "crm" && <Crm d={data} />}
       {data && tab === "reports" && <Reports d={data} />}
@@ -119,6 +122,14 @@ function Overview({ d }: { d: LoyaltyState }) {
       else row.r++;
     }
     const nrRows = [...nr.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-12).map(([m, v]) => ({ label: monthLabel(m), a: v.n, b: v.r }));
+    // the free-reward side: every reward ever given, and the ones used on bills (with what each took off)
+    const names = new Map(members.map((c) => [c.id, c.name]));
+    const billOff = new Map(s.bills.map((b) => [b.id, b.rewardDiscount]));
+    const usedRewards = d.vouchers
+      .filter((v) => v.status === "used")
+      .sort((a, b) => (b.usedAt ?? 0) - (a.usedAt ?? 0))
+      .map((v) => ({ id: v.id, name: v.name, who: names.get(v.customerId) ?? "—", invoice: v.invoiceNo ?? "", off: v.billId ? billOff.get(v.billId) ?? 0 : 0, cost: v.pointsCost }));
+    const rewardCounts = { given: d.vouchers.length, used: usedRewards.length, waiting: d.vouchers.filter((v) => v.status === "issued").length, lapsed: d.vouchers.filter((v) => v.status === "expired" || v.status === "cancelled").length };
     const popularity = new Map<string, number>();
     for (const v of d.vouchers) if (v.status === "used") popularity.set(v.name, (popularity.get(v.name) ?? 0) + 1);
     return {
@@ -126,6 +137,8 @@ function Overview({ d }: { d: LoyaltyState }) {
       active,
       newThisMonth: members.filter((c) => shopDate(c.createdAt).slice(0, 7) === thisMonth).length,
       repeat,
+      usedRewards,
+      rewardCounts,
       memberAov: memberOrders ? round2(memberSpend / memberOrders) : 0,
       otherAov: otherOrders ? round2(otherSpend / otherOrders) : 0,
       tiers,
@@ -167,6 +180,90 @@ function Overview({ d }: { d: LoyaltyState }) {
         <Stat label="Member avg. bill" value={rupee(o.memberAov)} hint={`Non-members: ${rupee(o.otherAov)}`} note="Average bill of customers who are loyalty members (counting all bills on their mobile number), against customers who aren't." />
         <Stat label="Points expiring soon" value={d.expiringSoon.reduce((a, x) => a + x.points, 0)} hint={`within ${cfg.expiry.warnDays} days · ${d.expiringSoon.length} members`} note="Points that will run out within the warning period you set in Settings — a good moment to remind those members." />
       </div>
+
+      <Card title="Points and rewards — what came in, what went out">
+        <div className="grid gap-6 md:grid-cols-2 md:divide-x md:divide-slate-100">
+          <section aria-label="Points" className="md:pr-6">
+            <h4 className="mb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Points</h4>
+            <p className="mb-3 text-[11.5px] text-slate-500">Earned by spending. 1 point = {rupee(cfg.redeem.pointValue)}.</p>
+            <dl className="space-y-1.5 text-[13px]">
+              <div className="flex justify-between">
+                <dt className="text-slate-600">Earned</dt>
+                <dd className="adm-num font-bold text-emerald-700">+{d.totals.earned.toLocaleString("en-IN")}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-slate-600">Used as money off, or on rewards bought with points</dt>
+                <dd className="adm-num font-bold">−{d.totals.redeemed.toLocaleString("en-IN")}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-slate-600">Expired</dt>
+                <dd className="adm-num font-bold">−{d.totals.expired.toLocaleString("en-IN")}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-slate-600">Taken back (deleted / refunded bills) and manual changes</dt>
+                <dd className="adm-num font-bold">{d.totals.adjusted < 0 ? "−" : d.totals.adjusted > 0 ? "+" : ""}{Math.abs(d.totals.adjusted).toLocaleString("en-IN")}</dd>
+              </div>
+              <div className="flex justify-between border-t border-slate-200 pt-2 text-[14px]">
+                <dt className="font-bold text-slate-900">Held by members now</dt>
+                <dd className="adm-num font-extrabold text-amber-700">
+                  {d.totals.outstanding.toLocaleString("en-IN")} pts · {rupee(pointsValue(d.totals.outstanding, cfg))}
+                </dd>
+              </div>
+              <div className="flex justify-between text-[12px] text-slate-500">
+                <dt>Money taken off bills with points</dt>
+                <dd className="adm-num font-semibold">{rupee(d.totals.discounts)}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section aria-label="Rewards" className="md:pl-6">
+            <h4 className="mb-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">Free rewards</h4>
+            <p className="mb-3 text-[11.5px] text-slate-500">Birthday treats, visit-stamp rewards and campaign gifts. They take money off a bill without using points.</p>
+            <dl className="space-y-1.5 text-[13px]">
+              <div className="flex justify-between">
+                <dt className="text-slate-600">Given to members</dt>
+                <dd className="adm-num font-bold">{o.rewardCounts.given}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-slate-600">Used on bills</dt>
+                <dd className="adm-num font-bold text-emerald-700">{o.rewardCounts.used}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-slate-600">Waiting to be used</dt>
+                <dd className="adm-num font-bold">{o.rewardCounts.waiting}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-slate-600">Expired or cancelled</dt>
+                <dd className="adm-num font-bold">{o.rewardCounts.lapsed}</dd>
+              </div>
+              <div className="flex justify-between border-t border-slate-200 pt-2 text-[14px]">
+                <dt className="font-bold text-slate-900">Money taken off bills with rewards</dt>
+                <dd className="adm-num font-extrabold text-red-700">{rupee(d.totals.rewardDiscounts)}</dd>
+              </div>
+            </dl>
+            {o.usedRewards.length > 0 && (
+              <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-100 text-[12.5px]">
+                {o.usedRewards.slice(0, 6).map((r) => (
+                  <li key={r.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <span className="min-w-0">
+                      <b className="block truncate text-slate-800">{r.name}</b>
+                      <span className="text-[11.5px] text-slate-500">
+                        {r.who}
+                        {r.invoice ? ` · ${r.invoice}` : ""}
+                        {r.cost > 0 ? ` · cost ${r.cost} pts` : " · free"}
+                      </span>
+                    </span>
+                    <span className="adm-num shrink-0 font-bold text-slate-900">{rupee(r.off)} off</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+        <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
+          <b>Points side:</b> earned − used − expired ± corrections = held now. <b>Rewards side</b> is separate — a free reward never changes the points.
+        </p>
+      </Card>
 
       <div className="grid gap-5 xl:grid-cols-2">
         <Card title="Points earned vs redeemed (monthly)">
