@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useRouter } from "next/navigation";
 import { APPROVAL_VERBS, type AdminState, type Order, type Session } from "@/lib/types";
 import type { Role } from "@/lib/auth";
-import { round2 } from "@/lib/money";
+import { round2, rupee } from "@/lib/money";
 
 /* ------------------------------------------------------------------
    Admin data store: one copy of the server state, kept fresh by a
@@ -243,6 +243,7 @@ export function AdminProvider({ initial, role, children }: { initial: AdminState
   const seen = useRef({
     orders: new Set(initial.orders.map((o) => o.id)),
     bills: new Set(initial.sessions.filter((x) => x.billRequestedAt).map((x) => x.id)),
+    claims: new Set(initial.sessions.filter((x) => x.payClaimedAt).map((x) => `${x.id}:${x.payClaimedAt}`)),
   });
   useEffect(() => {
     let ring = false;
@@ -258,6 +259,14 @@ export function AdminProvider({ initial, role, children }: { initial: AdminState
       seen.current.bills.add(x.id);
       ring = true;
       toast({ kind: "bill", title: `${whoIs(x)} asked for the bill`, body: `${x.customerName || "A guest"} is ready to pay.`, href: `/admin/billing?tab=${x.id}` });
+    }
+    for (const x of s.sessions) {
+      if (!x.payClaimedAt || x.status !== "open") continue;
+      const k = `${x.id}:${x.payClaimedAt}`;
+      if (seen.current.claims.has(k)) continue;
+      seen.current.claims.add(k);
+      ring = true;
+      toast({ kind: "bill", title: `${whoIs(x)} says they paid ${rupee(x.payClaimedAmount)} by UPI`, body: "Check your UPI app, then bill the tab.", href: `/admin/billing?tab=${x.id}` });
     }
     if (ring) chime();
   }, [s, toast, chime]);

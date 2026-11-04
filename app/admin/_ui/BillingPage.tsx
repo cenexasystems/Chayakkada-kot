@@ -115,6 +115,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     setLSel("");
     setLPts("");
     setCoupon(x.session.couponCode ?? "");
+    if (x.session.payClaimedAt) setPay("upi"); // the guest says they paid by UPI
     setSig(sigOf(x));
   };
 
@@ -267,7 +268,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
                     >
                       <span className="flex items-center justify-between">
                         <b className="block truncate text-[16px] font-extrabold text-slate-900">{x.session.customerName || "Guest"}</b>
-                        {x.billRequested && <span className="adm-pulse h-2.5 w-2.5 rounded-full bg-amber-400 text-amber-400" title="Asked for the bill" />}
+                        {x.session.payClaimedAt ? <span className="adm-pulse h-2.5 w-2.5 rounded-full bg-emerald-500 text-emerald-500" title="Says they paid by UPI" /> : x.billRequested && <span className="adm-pulse h-2.5 w-2.5 rounded-full bg-amber-400 text-amber-400" title="Asked for the bill" />}
                       </span>
                       <span className="adm-num block text-[15px] font-bold text-red-600">{rupee(x.total)}</span>
                       <span className="adm-num block truncate text-[11.5px] text-slate-500">
@@ -430,6 +431,16 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               </ul>
             ) : (
               <p className="py-3 text-center text-[12.5px] text-slate-400">No items added yet</p>
+            )}
+
+            {f?.session.payClaimedAt && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-[12.5px] leading-relaxed text-emerald-900">
+                <b>Guest says they paid {rupee(f.session.payClaimedAmount)} by UPI</b> at {new Date(f.session.payClaimedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}. Look for it in your UPI app{f.session.payClaimedRef ? ` (note ${f.session.payClaimedRef})` : ""}, then save this bill as UPI.
+                {Math.abs(f.session.payClaimedAmount - calc.total) > 0.5 && <span className="font-semibold"> The bill now comes to {rupee(calc.total)}.</span>}
+                <button type="button" className="ml-2 font-bold text-red-700 underline" onClick={() => act("tab.payclaim.clear", { id: f.session.id })}>
+                  Not received
+                </button>
+              </div>
             )}
 
             <div className="border-t border-dashed border-slate-200 pt-4">

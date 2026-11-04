@@ -17,6 +17,7 @@ const ORDER_BADGE: Record<Order["status"], [BadgeTone, string]> = {
 };
 
 function status(f: FloorTab): { tone: BadgeTone; label: string; bar: string } {
+  if (f.session.payClaimedAt) return { tone: "green", label: "Says paid by UPI", bar: "bg-emerald-500" };
   if (f.billRequested) return { tone: "amber", label: "Bill requested", bar: "bg-amber-400" };
   if (f.fresh) return { tone: "red", label: `${f.fresh} new order${f.fresh > 1 ? "s" : ""}`, bar: "bg-red-600" };
   return { tone: "green", label: "Open", bar: "bg-emerald-500" };
@@ -220,6 +221,11 @@ export default function TabsPage({ focus }: { focus?: string }) {
                     <p>{ago(f.session.openedAt, now)} ago</p>
                   </div>
                 </div>
+                {f.session.payClaimedAt && (
+                  <p className="mt-3 flex items-center gap-2 rounded-xl bg-emerald-100 px-3 py-2 text-[12.5px] font-semibold text-emerald-900">
+                    <Icon name="rupee" size={15} /> Guest says they paid {rupee(f.session.payClaimedAmount)} by UPI — check your UPI app
+                  </p>
+                )}
                 {f.billRequested && (
                   <p className="mt-3 flex items-center gap-2 rounded-xl bg-amber-100 px-3 py-2 text-[12.5px] font-semibold text-amber-900">
                     <Icon name="billing" size={15} /> Guest asked for the bill

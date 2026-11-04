@@ -35,6 +35,10 @@ export type Session = {
   billRequestedAt: number | null;
   billId: string | null;
   couponCode: string | null;
+  /** the guest said they paid by UPI (when, how much, the QR reference) — staff still have to confirm it */
+  payClaimedAt: number | null;
+  payClaimedAmount: number;
+  payClaimedRef: string;
 };
 
 export type OrderItem = {
@@ -207,6 +211,7 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   "loyalty.reward.delete": "Removed a reward",
   "loyalty.campaign.save": "Saved a campaign",
   "loyalty.campaign.delete": "Removed a campaign",
+  "tab.payclaim.clear": "Marked a guest's UPI payment as not received",
   "approval.approve": "Approved a staff change",
   "approval.reject": "Rejected a staff change",
 };
@@ -476,7 +481,7 @@ export type DB = {
 
 /** What the admin panel receives (no secrets). */
 export type AdminState = Omit<DB, "settings" | "users"> & {
-  settings: ShopDetails & { shopName: string; publicUrl: string; walkInsOnly: boolean; kotEnabled: boolean; orderingEnabled: boolean };
+  settings: ShopDetails & { shopName: string; publicUrl: string; walkInsOnly: boolean; kotEnabled: boolean; orderingEnabled: boolean; upiId: string; upiName: string; upiQrMinutes: number };
   users: PublicUser[];
   /** how loyalty points are earned, so each item can show what it earns */
   loyaltyEarn: Pick<LoyaltyConfig, "enabled" | "earn">;
@@ -514,6 +519,10 @@ export type TabView = {
     coupon: { code: string; percent: number; discount: number; ok: boolean; reason: string } | null;
     /** what the guest should expect to pay: total minus the coupon */
     payable: number;
+    /** where to pay by UPI, when the shop has set it up */
+    upi: { id: string; name: string; minutes: number } | null;
+    /** the guest has said they paid this much (it is for staff to confirm) */
+    payClaim: { amount: number; at: number } | null;
   } | null;
 };
 

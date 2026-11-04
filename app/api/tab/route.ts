@@ -1,5 +1,5 @@
 import { body, handle } from "@/lib/http";
-import { applyCoupon, placeOrder, removeCoupon, requestBill, tabView } from "@/lib/ops";
+import { applyCoupon, payClaim, payUnclaim, placeOrder, removeCoupon, requestBill, tabView } from "@/lib/ops";
 import { ApiError } from "@/lib/store";
 
 /* Customer endpoints. A guest is known by their mobile, which travels in the
@@ -13,6 +13,8 @@ export async function POST(req: Request) {
     if (b.action === "bill") return requestBill(b.phone);
     if (b.action === "coupon") return applyCoupon(b.phone, b.code);
     if (b.action === "coupon.remove") return removeCoupon(b.phone);
+    if (b.action === "pay.claim") return payClaim(b.phone, b.ref);
+    if (b.action === "pay.unclaim") return payUnclaim(b.phone);
     throw new ApiError("Unknown action.");
   });
 }

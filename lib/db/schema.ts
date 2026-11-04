@@ -40,6 +40,10 @@ export const settings = pgTable("settings", {
   /** When false the customer-facing site is menu-only: no cart, no tabs, no "send to kitchen".
       Admin's "Open tabs" and the Billing "Customer tab" mode also hide. */
   orderingEnabled: boolean("ordering_enabled").notNull().default(true),
+  /** the shop's UPI ID (name@bank) that guests pay to, the name shown in their UPI app, and how long one QR stays up before a fresh one replaces it */
+  upiId: text("upi_id").notNull().default(""),
+  upiName: text("upi_name").notNull().default(""),
+  upiQrMinutes: integer("upi_qr_minutes").notNull().default(5),
 });
 
 /** Single row (id = 1): the change counter the admin panel polls, and the order-number sequence. */
@@ -81,6 +85,11 @@ export const sessions = pgTable(
     billId: text("bill_id"),
     /** coupon the guest applied from their phone; validated again when the bill is made */
     couponCode: text("coupon_code"),
+    /** the guest tapped "I've paid" after paying by UPI: when, how much, and the QR reference they paid with.
+        Nothing is confirmed by this — staff check their UPI app and then bill the tab. */
+    payClaimedAt: ms("pay_claimed_at"),
+    payClaimedAmount: money("pay_claimed_amount").notNull().default(0),
+    payClaimedRef: text("pay_claimed_ref").notNull().default(""),
   },
   (t) => [
     // a phone number can never have two open tabs

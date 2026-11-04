@@ -153,6 +153,8 @@ async function view(q: Q, phone: string): Promise<TabView> {
           name: s.customerName.split(" ")[0] ?? "",
           coupon: cp ? { code: cp.code, percent: cp.percent, discount, ok: !!check?.ok, reason: check && !check.ok ? check.reason : "" } : null,
           payable: round2(Math.max(0, total - discount)),
+          upi: st?.upiId ? { id: st.upiId, name: st.upiName || name, minutes: st.upiQrMinutes } : null,
+          payClaim: s.payClaimedAt ? { amount: s.payClaimedAmount, at: s.payClaimedAt } : null,
         }
       : null,
   };
@@ -290,6 +292,47 @@ export function applyCoupon(raw: unknown, couponRaw: unknown) {
   }).then(async (phone) => ({ view: await tabView(phone) }));
 }
 
+/** What a guest owes on their open tab right now: their orders, less the coupon they applied. */
+async function payableOf(q: Q, s: { id: string; customerPhone: string; couponCode: string | null }) {
+  const live = (await q.select().from(orders).where(eq(orders.sessionId, s.id))).filter((o) => o.status !== "cancelled");
+  const total = round2(live.reduce((a, o) => a + o.subtotal, 0));
+  if (!s.couponCode) return total;
+  const cp = await first(q.select().from(coupons).where(eq(coupons.code, s.couponCode)));
+  if (!cp) return total;
+  const member = await L.isMember(q, s.customerPhone);
+  if (!checkCoupon(cp, total, s.customerPhone, member).ok) return total;
+  const off = computeBill({ items: live.flatMap((o) => o.items), coupon: cp, manualType: "amount", manualValue: 0, extra: 0, phone: s.customerPhone, member }).couponDiscount;
+  return round2(Math.max(0, total - off));
+}
+
+/** The guest paid by UPI and says so. Nothing is confirmed — the amount, the time and the QR reference are
+    kept for staff, who check their own UPI app and then bill the tab. The counter is told the guest is ready. */
+export function payClaim(raw: unknown, refRaw: unknown) {
+  return mutate(async (tx) => {
+    const phone = phoneOf(raw);
+    const s = await openSession(tx, phone);
+    if (!s) throw new ApiError("There's nothing on your tab yet.");
+    const amount = await payableOf(tx, s);
+    if (!(amount > 0)) throw new ApiError("There's nothing to pay yet.");
+    const now = Date.now();
+    await tx
+      .update(sessions)
+      .set({ payClaimedAt: now, payClaimedAmount: amount, payClaimedRef: str(refRaw, 40).replace(/[^A-Za-z0-9-]/g, ""), billRequestedAt: s.billRequestedAt ?? now })
+      .where(eq(sessions.id, s.id));
+    return phone;
+  }).then(async (phone) => ({ view: await tabView(phone) }));
+}
+
+/** The guest changed their mind (tapped "I've paid" by mistake). */
+export function payUnclaim(raw: unknown) {
+  return mutate(async (tx) => {
+    const phone = phoneOf(raw);
+    const s = await openSession(tx, phone);
+    if (s) await tx.update(sessions).set({ payClaimedAt: null, payClaimedAmount: 0, payClaimedRef: "" }).where(eq(sessions.id, s.id));
+    return phone;
+  }).then(async (phone) => ({ view: await tabView(phone) }));
+}
+
 export function removeCoupon(raw: unknown) {
   return mutate(async (tx) => {
     const phone = phoneOf(raw);
@@ -341,6 +384,9 @@ export async function adminState(): Promise<AdminState> {
       walkInsOnly: st[0]?.walkInsOnly ?? false,
       kotEnabled: st[0]?.kotEnabled ?? true,
       orderingEnabled: st[0]?.orderingEnabled ?? true,
+      upiId: st[0]?.upiId ?? "",
+      upiName: st[0]?.upiName ?? "",
+      upiQrMinutes: st[0]?.upiQrMinutes ?? 5,
     },
     products: prods.map((p) => ({ ...p, image: imgLink(p.id, p.updatedAt, p.image) })),
     sessions: sess,
@@ -1079,6 +1125,13 @@ async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<unknown
           const name = str(a.shopName, 60);
           if (name) patch.shopName = name;
         }
+        if (a.upiId !== undefined) {
+          const v = str(a.upiId, 80).toLowerCase();
+          if (v && !/^[a-z0-9._-]{2,64}@[a-z0-9.-]{2,32}$/.test(v)) throw new ApiError("The UPI ID should look like name@bank.");
+          patch.upiId = v;
+        }
+        if (a.upiName !== undefined) patch.upiName = str(a.upiName, 60);
+        if (a.upiQrMinutes !== undefined) patch.upiQrMinutes = int(a.upiQrMinutes, 1, 30, 5);
         if (a.ownerName !== undefined) patch.ownerName = str(a.ownerName, 80);
         if (a.location !== undefined) patch.location = str(a.location, 120);
         for (const k of ["address", "address2"] as const) {
@@ -1147,6 +1200,12 @@ async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<unknown
       }
 
       /* ---------- tabs ---------- */
+      case "tab.payclaim.clear": {
+        // staff looked in their UPI app and the money isn't there: take the guest's "I've paid" off the tab
+        const s = await must(tx.select().from(sessions).where(and(eq(sessions.id, id), eq(sessions.status, "open"))), "Tab");
+        await tx.update(sessions).set({ payClaimedAt: null, payClaimedAmount: 0, payClaimedRef: "" }).where(eq(sessions.id, s.id));
+        return null;
+      }
       case "tab.clear": {
         const s = await must(tx.select().from(sessions).where(and(eq(sessions.id, id), eq(sessions.status, "open"))), "Tab");
         await tx.update(sessions).set({ status: "void", closedAt: now }).where(eq(sessions.id, s.id));

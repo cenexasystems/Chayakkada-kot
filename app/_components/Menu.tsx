@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { MenuItem, OrderStatus, TabClose, TabView } from "@/lib/types";
 import { rupee } from "@/lib/money";
 import { Arrow, Cherry } from "./bits";
+import { UpiPay } from "./UpiPay";
 
 /* ============================================================
    MENU — what a guest sees after scanning the shop's QR.
@@ -851,6 +852,8 @@ export default function Menu({ initial }: { initial: TabView }) {
               {!tab.billRequested && <CouponBox tab={tab} phone={phone} onView={setView} />}
               <p className="tm-rcpt__fine">Any other discount is applied at the counter.</p>
             </div>
+
+            {tab.upi && tab.payable > 0 && <UpiPay tab={tab} shop={view.shopName} phone={phone} onView={setView} />}
 
             {tab.billRequested ? (
               <div className="tm-billed tm-billed--big">
