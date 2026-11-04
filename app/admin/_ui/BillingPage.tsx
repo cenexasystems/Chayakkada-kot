@@ -8,6 +8,7 @@ import Catalog from "./Catalog";
 import PrintModal, { PrintFormats } from "./PrintModal";
 import { Receipt, billText, waLink, type PrintFormat } from "./receipt";
 import { Badge, Btn, Icon, Modal, WaIcon, cx, fmtTime, ago } from "./kit";
+import { UpiQrCard } from "./UpiQrCard";
 import { MemberStrip, RedeemBox, SavedLoyalty, earnPreview, loyaltyCalc, useLoyaltyLookup } from "./loyalty/billing";
 
 type Line = { key: number; productId: string | null; name: string; price: string; qty: number };
@@ -621,6 +622,9 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
                 </div>
               ) : (
                 <p className="text-[12.5px] text-slate-500">Collect {rupee(calc.total)} by {pay === "upi" ? "UPI" : "card"}, then complete the bill.</p>
+              )}
+              {s.settings.upiId && (pay === "upi" ? calc.total : pay === "split" ? sUpi : 0) > 0 && (
+                <UpiQrCard upi={{ id: s.settings.upiId, name: s.settings.upiName || shop, minutes: s.settings.upiQrMinutes }} amount={pay === "upi" ? calc.total : sUpi} shop={shop} label={pay === "upi" ? "Scan to pay" : "Scan to pay the UPI part:"} />
               )}
             </div>
 

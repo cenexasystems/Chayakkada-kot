@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { TabView } from "@/lib/types";
 import { rupee } from "@/lib/money";
 import { Qr } from "../admin/_ui/Qr";
+import { mmss, useUpiQr } from "./upiQr";
 
 type Tab = NonNullable<TabView["tab"]>;
 
@@ -12,29 +13,12 @@ type Tab = NonNullable<TabView["tab"]>;
    replaced by a fresh one with a new reference. The shop's UPI account can't tell the app a payment
    arrived, so "I've paid" only tells the counter; staff check their own UPI app before billing. */
 
-const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-const enc = (v: string) => encodeURIComponent(v).replace(/%40/g, "@");
-
 export function UpiPay({ tab, shop, phone, onView }: { tab: Tab; shop: string; phone: string; onView: (v: TabView) => void }) {
   const upi = tab.upi!;
-  const period = Math.max(1, upi.minutes) * 60_000;
-  const [startedAt] = useState(() => Date.now());
-  const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  // everything below follows from the clock: the QR number, the reference, the time left
-  const elapsed = Math.max(0, now - startedAt);
-  const round = Math.floor(elapsed / period);
-  const left = Math.max(0, Math.ceil((period - (elapsed % period)) / 1000));
-  const ref = `T${phone.slice(-4)}${(startedAt + round * period).toString(36).toUpperCase().slice(-6)}`;
-  const link = `upi://pay?pa=${enc(upi.id)}&pn=${enc(upi.name)}&am=${tab.payable.toFixed(2)}&cu=INR&tn=${enc(`${shop} ${ref}`.slice(0, 40))}&tr=${enc(ref)}`;
+  const { link, ref, left } = useUpiQr(upi, tab.payable, shop, `T${phone.slice(-4)}`);
 
   const claim = tab.payClaim;
   const claimedFull = !!claim && Math.abs(claim.amount - tab.payable) < 0.01;
