@@ -218,7 +218,9 @@ export function segmentOf(st: PurchaseStats, cfg: LoyaltyConfig, tier: TierKey |
   if (since >= c.lostDays) return "lost";
   if (since >= c.inactiveDays) return "inactive";
   if (since >= c.atRiskDays && st.visits >= c.regularVisits) return "at_risk";
-  if (tier === "platinum" || st.spent >= c.vipSpend) return "vip";
+  // VIP = the top membership (whatever the owner calls it) or enough total spend
+  const top = cfg.tiers.length > 1 ? cfg.tiers[cfg.tiers.length - 1].key : null;
+  if ((top !== null && tier === top) || st.spent >= c.vipSpend) return "vip";
   if (st.spent >= c.highValue) return "high_value";
   if (st.recentVisits >= c.frequentVisits) return "frequent";
   if (st.visits >= c.regularVisits) return "regular";

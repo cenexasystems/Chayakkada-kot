@@ -180,12 +180,13 @@ export function usePaged<T>(rows: T[], size = 25) {
   return { rows: rows.slice((p - 1) * size, p * size), page: p, pages, setPage, total: rows.length };
 }
 
-export function Stat({ label, value, hint, tone }: { label: string; value: React.ReactNode; hint?: string; tone?: "red" | "green" | "amber" }) {
+export function Stat({ label, value, hint, tone, note }: { label: string; value: React.ReactNode; hint?: string; tone?: "red" | "green" | "amber"; note?: string }) {
   return (
     <div className="min-w-0 rounded-2xl border border-slate-100 bg-white p-4 shadow-[0_2px_10px_-2px_rgba(15,23,42,.08)]">
       <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600">{label}</span>
       <div className={cx("adm-num mt-2 truncate text-[22px] font-extrabold", tone === "red" ? "text-red-600" : tone === "green" ? "text-emerald-600" : tone === "amber" ? "text-amber-600" : "text-slate-900")}>{value}</div>
       {hint && <p className="mt-1 truncate text-[11px] text-slate-400">{hint}</p>}
+      {note && <p className="mt-2 border-t border-slate-100 pt-2 text-[11px] leading-snug text-slate-500">{note}</p>}
     </div>
   );
 }

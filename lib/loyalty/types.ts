@@ -183,7 +183,7 @@ export type LoyaltyState = {
   referrals: Referral[];
   audit: Audit[];
   months: MonthRow[];
-  totals: { earned: number; redeemed: number; expired: number; discounts: number; rewardDiscounts: number; rewardRedemptions: number; outstanding: number; debt: number };
+  totals: { earned: number; redeemed: number; expired: number; /** net of everything else: points taken back when a bill was voided or refunded, manual adjustments */ adjusted: number; discounts: number; rewardDiscounts: number; rewardRedemptions: number; outstanding: number; debt: number };
   /** customer ids whose balance doesn't match their ledger / point lots — should stay empty */
   mismatched: string[];
   expiringSoon: { customerId: string; points: number; expiresAt: number }[];

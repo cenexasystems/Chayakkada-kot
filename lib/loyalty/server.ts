@@ -892,7 +892,8 @@ export async function loyaltyState(): Promise<LoyaltyState> {
       select
         coalesce(sum(points) filter (where type in ('purchase','bonus','promo','referral','occasion')), 0)::int earned,
         coalesce(-sum(points) filter (where type in ('redemption','reward')), 0)::int redeemed,
-        coalesce(-sum(points) filter (where type = 'expiry'), 0)::int expired
+        coalesce(-sum(points) filter (where type = 'expiry'), 0)::int expired,
+        coalesce(sum(points) filter (where type not in ('purchase','bonus','promo','referral','occasion','redemption','reward','expiry')), 0)::int adjusted
       from ${loyaltyLedger}`),
     q.execute(sql`select coalesce(sum(points_discount), 0)::float d, coalesce(sum(reward_discount), 0)::float r from ${bills} where status = 'completed'`),
     mismatches(q),
@@ -906,7 +907,7 @@ export async function loyaltyState(): Promise<LoyaltyState> {
   const months = (monthRows.rows as { m: string; earned: number; redeemed: number; expired: number }[]).map((r) => ({ month: r.m, earned: r.earned, redeemed: r.redeemed, expired: r.expired, registrations: regs.get(r.m) ?? 0 }));
   for (const [m, n] of regs) if (!months.some((x) => x.month === m)) months.push({ month: m, earned: 0, redeemed: 0, expired: 0, registrations: n });
   months.sort((a, b) => a.month.localeCompare(b.month));
-  const t = (totalRows.rows[0] ?? { earned: 0, redeemed: 0, expired: 0 }) as { earned: number; redeemed: number; expired: number };
+  const t = (totalRows.rows[0] ?? { earned: 0, redeemed: 0, expired: 0, adjusted: 0 }) as { earned: number; redeemed: number; expired: number; adjusted: number };
   const bd = (billRows.rows[0] ?? { d: 0, r: 0 }) as { d: number; r: number };
   return {
     config: cfg,
@@ -921,6 +922,7 @@ export async function loyaltyState(): Promise<LoyaltyState> {
       earned: t.earned,
       redeemed: t.redeemed,
       expired: t.expired,
+      adjusted: t.adjusted,
       discounts: round2(bd.d),
       rewardDiscounts: round2(bd.r),
       rewardRedemptions: vouchers.filter((v) => v.status === "used").length,

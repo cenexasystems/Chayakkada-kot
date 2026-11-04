@@ -152,14 +152,20 @@ function Overview({ d }: { d: LoyaltyState }) {
         </p>
       )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Loyalty members" value={o.members.length} hint={`${o.active.length} active · ${o.newThisMonth} joined this month`} />
-        <Stat label="Repeat members" value={o.repeat} hint="2 or more visits" />
-        <Stat label="Points earned" value={d.totals.earned.toLocaleString("en-IN")} hint={`${d.totals.redeemed.toLocaleString("en-IN")} redeemed · ${d.totals.expired.toLocaleString("en-IN")} expired`} tone="green" />
-        <Stat label="Outstanding liability" value={rupee(pointsValue(d.totals.outstanding, cfg))} hint={`${d.totals.outstanding.toLocaleString("en-IN")} unspent points`} tone="amber" />
-        <Stat label="Loyalty discounts given" value={rupee(d.totals.discounts + d.totals.rewardDiscounts)} hint={`${rupee(d.totals.discounts)} points · ${rupee(d.totals.rewardDiscounts)} rewards`} tone="red" />
-        <Stat label="Reward redemptions" value={d.totals.rewardRedemptions} hint={`${d.vouchers.filter((v) => v.status === "issued").length} rewards waiting to be used`} />
-        <Stat label="Member avg. bill" value={rupee(o.memberAov)} hint={`Non-members: ${rupee(o.otherAov)}`} />
-        <Stat label="Points expiring soon" value={d.expiringSoon.reduce((a, x) => a + x.points, 0)} hint={`within ${cfg.expiry.warnDays} days · ${d.expiringSoon.length} members`} />
+        <Stat label="Loyalty members" value={o.members.length} hint={`${o.active.length} active · ${o.newThisMonth} joined this month`} note="Customers enrolled in your loyalty programme. Only active members earn and use points." />
+        <Stat label="Repeat members" value={o.repeat} hint="2 or more visits" note="Members who have come on 2 or more different days — a sign the programme is bringing people back." />
+        <Stat
+          label="Points earned"
+          value={d.totals.earned.toLocaleString("en-IN")}
+          hint={`${d.totals.redeemed.toLocaleString("en-IN")} used · ${d.totals.expired.toLocaleString("en-IN")} expired${d.totals.adjusted ? ` · ${d.totals.adjusted > 0 ? "+" : "−"}${Math.abs(d.totals.adjusted).toLocaleString("en-IN")} corrections` : ""}`}
+          note={`All points ever given to members (bills, birthdays, referrals…). Earned − used − expired${d.totals.adjusted ? " ± corrections (points taken back for deleted or refunded bills, manual changes)" : ""} = the ${d.totals.outstanding.toLocaleString("en-IN")} points members hold now.`}
+          tone="green"
+        />
+        <Stat label="Outstanding liability" value={rupee(pointsValue(d.totals.outstanding, cfg))} hint={`${d.totals.outstanding.toLocaleString("en-IN")} unspent points`} note="What members' unspent points are worth in rupees — what you would give away if every member used all their points." tone="amber" />
+        <Stat label="Loyalty discounts given" value={rupee(d.totals.discounts + d.totals.rewardDiscounts)} hint={`${rupee(d.totals.discounts)} points · ${rupee(d.totals.rewardDiscounts)} rewards`} note="Money taken off completed bills because members used points or free rewards." tone="red" />
+        <Stat label="Reward redemptions" value={d.totals.rewardRedemptions} hint={`${d.vouchers.filter((v) => v.status === "issued").length === 1 ? "1 reward waiting" : `${d.vouchers.filter((v) => v.status === "issued").length} rewards waiting`} to be used`} note="Free rewards (such as a birthday treat) that members have already used on a bill." />
+        <Stat label="Member avg. bill" value={rupee(o.memberAov)} hint={`Non-members: ${rupee(o.otherAov)}`} note="Average bill of customers who are loyalty members (counting all bills on their mobile number), against customers who aren't." />
+        <Stat label="Points expiring soon" value={d.expiringSoon.reduce((a, x) => a + x.points, 0)} hint={`within ${cfg.expiry.warnDays} days · ${d.expiringSoon.length} members`} note="Points that will run out within the warning period you set in Settings — a good moment to remind those members." />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-2">

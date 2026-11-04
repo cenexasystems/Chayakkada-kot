@@ -6,9 +6,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Bill, OrderItem, Product } from "@/lib/types";
-import { rupee, shopToday } from "@/lib/money";
+import { round2, rupee, shopToday } from "@/lib/money";
 import type { LoyaltyLookup } from "@/lib/loyalty/types";
-import { campaignApplies, earnFor, nextTier, pointsValue, redeemCap, rewardValue, segmentOf, tierByKey, voucherLive } from "@/lib/loyalty/engine";
+import { campaignApplies, earnFor, eligibleSubtotal, nextTier, pointsValue, redeemCap, rewardValue, segmentOf, tierByKey, voucherLive } from "@/lib/loyalty/engine";
 import { useAdmin } from "../Store";
 import { MemberUpdate } from "./notify";
 import { Badge, Btn, Icon, Modal, cx, inputLineCls, labelCls } from "../kit";
@@ -111,7 +111,7 @@ export function earnPreview(lk: LoyaltyLookup | null, items: OrderItem[], produc
   const now = Date.now();
   const seg = segmentOf(lk.stats, lk.config, c.tier, now);
   const ratio = subtotal > 0 ? Math.max(0, subtotal - discount) / subtotal : 0;
-  const net = items.reduce((a, i) => a + i.price * i.qty, 0) * ratio;
+  const net = round2(eligibleSubtotal(items, catOf, lk.config.earn.excludedProductIds, lk.config.earn.excludedCategories) * ratio);
   const camps = lk.campaigns.filter((k) => campaignApplies(k, { now, tier: c.tier, segment: seg, eligibleNet: net, items, catOf }));
   return earnFor({ cfg: lk.config, items, catOf, pointsOf, subtotal, discount, tier: c.tier, firstPurchase: lk.firstPurchase, campaigns: camps }).total;
 }
