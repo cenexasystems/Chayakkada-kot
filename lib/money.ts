@@ -137,3 +137,36 @@ export function loyaltySummary(b: Bill): [string, string][] | null {
   if (b.loyaltyBalance !== null) rows.push(["Remaining balance", `${b.loyaltyBalance} points`]);
   return rows;
 }
+
+/** An amount in Indian style with exactly two decimals, e.g. 1,25,000.00 (printed on invoices) */
+export const inr2 = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Indian-style number to words (lakh / crore)
+export function numberToWords(num: number): string {
+  const a = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const chunk = (n: number) => {
+    let s = "";
+    if (n >= 100) {
+      s += `${a[Math.floor(n / 100)]} Hundred `;
+      n %= 100;
+    }
+    if (n >= 20) s += `${b[Math.floor(n / 10)]}${n % 10 ? ` ${a[n % 10]}` : ""} `;
+    else if (n > 0) s += `${a[n]} `;
+    return s.trim();
+  };
+  const int = Math.floor(Math.abs(num));
+  const paise = Math.round((Math.abs(num) - int) * 100);
+  if (!int && !paise) return "Zero Rupees Only";
+  const parts: [number, string][] = [
+    [Math.floor(int / 10000000), "Crore"],
+    [Math.floor((int % 10000000) / 100000), "Lakh"],
+    [Math.floor((int % 100000) / 1000), "Thousand"],
+    [int % 1000, ""],
+  ];
+  const words = parts
+    .filter(([n]) => n > 0)
+    .map(([n, u]) => `${chunk(n)} ${u}`.trim())
+    .join(" ");
+  return `${words || "Zero"} Rupees${paise ? ` and ${chunk(paise)} Paise` : ""} Only`;
+}

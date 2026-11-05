@@ -144,9 +144,12 @@ export function earnPreview(lk: LoyaltyLookup | null, items: OrderItem[], produc
 /* ---------------- customer strip (under Customer details) ---------------- */
 export function MemberStrip({ phone, name, lk, loading, onEnrolled }: { phone: string; name: string; lk: LoyaltyLookup | null; loading: boolean; onEnrolled: () => void }) {
   const [enrol, setEnrol] = useState(false);
-  if (!okPhone(phone)) return null;
-  if (loading && !lk) return <p className="mt-3 text-[12px] text-slate-400">Checking loyalty…</p>;
-  if (!lk || !lk.enabled) return null;
+  /* The sign-up pop-up lives here, outside the "not a member" strip: registering makes the customer a member, which
+     replaces that strip — and the welcome-message step must stay open until it is closed. */
+  const modal = enrol ? <EnrolModal phone={phone} name={name || lk?.knownName || ""} onClose={() => setEnrol(false)} onDone={onEnrolled} /> : null;
+  if (!okPhone(phone) && !enrol) return null;
+  if (loading && !lk) return <>{modal ?? <p className="mt-3 text-[12px] text-slate-400">Checking loyalty…</p>}</>;
+  if (!lk || !lk.enabled) return modal;
   const c = lk.customer;
   if (!c)
     return (
@@ -157,21 +160,24 @@ export function MemberStrip({ phone, name, lk, loading, onEnrolled }: { phone: s
             Add to loyalty
           </Btn>
         </div>
-        {enrol && <EnrolModal phone={phone} name={name || lk.knownName} onClose={() => setEnrol(false)} onDone={onEnrolled} />}
+        {modal}
       </>
     );
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-amber-200 bg-amber-50/60 px-3.5 py-2.5 text-[12.5px]">
-      <span className="flex items-center gap-2">
-        <Icon name="star" size={14} className="text-amber-600" />
-        <b className="text-slate-900">{c.name}</b>
-        {c.status !== "active" && <Badge tone="red">Deactivated</Badge>}
-      </span>
-      <span className="text-slate-700">
-        <b className="adm-num text-slate-900">{c.available}</b> points <span className="text-slate-500">(worth {rupee(pointsValue(c.available, lk.config))})</span>
-      </span>
-      {lk.vouchers.length > 0 && <span className="font-semibold text-emerald-700">{lk.vouchers.length} reward{lk.vouchers.length === 1 ? "" : "s"} unlocked</span>}
-    </div>
+    <>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-amber-200 bg-amber-50/60 px-3.5 py-2.5 text-[12.5px]">
+        <span className="flex items-center gap-2">
+          <Icon name="star" size={14} className="text-amber-600" />
+          <b className="text-slate-900">{c.name}</b>
+          {c.status !== "active" && <Badge tone="red">Deactivated</Badge>}
+        </span>
+        <span className="text-slate-700">
+          <b className="adm-num text-slate-900">{c.available}</b> points <span className="text-slate-500">(worth {rupee(pointsValue(c.available, lk.config))})</span>
+        </span>
+        {lk.vouchers.length > 0 && <span className="font-semibold text-emerald-700">{lk.vouchers.length} reward{lk.vouchers.length === 1 ? "" : "s"} unlocked</span>}
+      </div>
+      {modal}
+    </>
   );
 }
 

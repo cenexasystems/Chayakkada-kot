@@ -3,43 +3,13 @@ import type { Metadata } from "next";
 import { billForInvoice } from "@/lib/ops";
 import { getConfig } from "@/lib/loyalty/server";
 import { db } from "@/lib/db";
-import { TZ, loyaltySummary, payLabel, payParts } from "@/lib/money";
+import { TZ, inr2 as inr, loyaltySummary, numberToWords, payLabel, payParts } from "@/lib/money";
 import { InvoiceActions } from "./InvoiceActions";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Invoice", robots: { index: false } };
 
-const inr = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Indian-style number to words (lakh / crore)
-function numberToWords(num: number): string {
-  const a = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
-  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-  const chunk = (n: number) => {
-    let s = "";
-    if (n >= 100) {
-      s += `${a[Math.floor(n / 100)]} Hundred `;
-      n %= 100;
-    }
-    if (n >= 20) s += `${b[Math.floor(n / 10)]}${n % 10 ? ` ${a[n % 10]}` : ""} `;
-    else if (n > 0) s += `${a[n]} `;
-    return s.trim();
-  };
-  const int = Math.floor(Math.abs(num));
-  const paise = Math.round((Math.abs(num) - int) * 100);
-  if (!int && !paise) return "Zero Rupees Only";
-  const parts: [number, string][] = [
-    [Math.floor(int / 10000000), "Crore"],
-    [Math.floor((int % 10000000) / 100000), "Lakh"],
-    [Math.floor((int % 100000) / 1000), "Thousand"],
-    [int % 1000, ""],
-  ];
-  const words = parts
-    .filter(([n]) => n > 0)
-    .map(([n, u]) => `${chunk(n)} ${u}`.trim())
-    .join(" ");
-  return `${words || "Zero"} Rupees${paise ? ` and ${chunk(paise)} Paise` : ""} Only`;
-}
 
 export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ embed?: string }> }) {
   const { id } = await params;

@@ -1,5 +1,5 @@
 import type { Bill, ShopDetails } from "@/lib/types";
-import { loyaltySummary, payLabel, payParts, rupee } from "@/lib/money";
+import { TZ, inr2 as inr, loyaltySummary, numberToWords, payLabel, payParts, rupee } from "@/lib/money";
 import { fmtDateTime } from "./kit";
 
 
@@ -70,152 +70,201 @@ export function Receipt({ b: bill, shop, details, fmt = DEFAULT_FORMAT, showLoya
   return (
     <>
       <style>{pageCss(fmt)}</style>
-      {fmt.kind === "thermal" ? <Thermal b={b} shop={shop} logo={details?.logoUrl} lines={headerLines(details)} roll={fmt.roll} /> : <Sheet b={b} shop={shop} logo={details?.logoUrl} lines={headerLines(details)} size={fmt.size} />}
+      {fmt.kind === "thermal" ? <Thermal b={b} shop={shop} logo={details?.logoUrl} lines={headerLines(details)} roll={fmt.roll} /> : <Sheet b={b} shop={shop} logo={details?.logoUrl} details={details} size={fmt.size} />}
     </>
   );
 }
 
-/** Full-page invoice for A3 / A4 / A5 — one layout, scaled by the paper size. */
-function Sheet({ b, shop, logo, lines, size }: { b: Bill; shop: string; logo?: string; lines: string[]; size: "A3" | "A4" | "A5" }) {
+/** Full-page invoice for A3 / A4 / A5 — the same layout as the invoice page (header, billed to, items, amount in words,
+    totals, signature), scaled by the paper size. */
+function Sheet({ b, shop, logo, details, size }: { b: Bill; shop: string; logo?: string; details?: ShopDetails; size: "A3" | "A4" | "A5" }) {
+  const date = new Date(b.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: TZ });
+  const time = new Date(b.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: TZ });
+  const addr = (details?.address ?? "").split("\n").filter(Boolean).join(", ");
+  const contact = [details?.customerCare && `Phone: ${details.customerCare}`, details?.email].filter(Boolean).join(" · ");
+  const loy = loyaltySummary(b);
   return (
     <div className={`inv inv--${size.toLowerCase()}`}>
       <header className="inv__head">
-        <div>
+        <div className="inv__brand">
           {logo && <img src={logo} alt="" style={{ height: 56, width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: 6, display: "block" }} />}
           <h1>{shop}</h1>
-          {lines.map((l, i) => <p key={i}>{l}</p>)}
+          {addr && <p>{addr}</p>}
+          {contact && <p>{contact}</p>}
         </div>
         <div className="inv__meta">
-          <h2>{b.isGst ? "TAX INVOICE" : "INVOICE"}</h2>
-          <p>
-            <b>{b.invoiceNo}</b>
-          </p>
-          <p>{fmtDateTime(b.createdAt)}</p>
+          <h2>{b.isGst ? "Tax Invoice" : "Invoice"}</h2>
+          <p className="inv__no">{b.invoiceNo}</p>
+          <dl>
+            <div>
+              <dt>Date:</dt>
+              <dd>
+                <b>{date}</b>
+              </dd>
+            </div>
+            <div>
+              <dt>Time:</dt>
+              <dd>{time}</dd>
+            </div>
+            <div>
+              <dt>Payment:</dt>
+              <dd>
+                <b>
+                  {payLabel(b)} • {b.status === "void" ? "VOID" : "PAID"}
+                </b>
+              </dd>
+            </div>
+            <div>
+              <dt>Channel:</dt>
+              <dd>{b.source === "tab" ? "ORDER FROM PHONE" : "COUNTER"}</dd>
+            </div>
+          </dl>
         </div>
       </header>
 
       <section className="inv__to">
-        <div>
-          <span>Billed to</span>
-          <b>{b.customerName || "Walk-in customer"}</b>
-          {b.customerPhone && <p>{b.customerPhone}</p>}
-        </div>
-        <div className="inv__r">
-          <span>{b.source === "tab" ? "Customer" : "Counter"}</span>
-          <b>{b.customerPhone || "Walk-in"}</b>
-          <p>Paid by {payLabel(b)}</p>
-        </div>
+        <span>Billed to</span>
+        <b>{b.customerName.trim() || "Walk-in customer"}</b>
+        {b.customerPhone ? <p className="inv__mono">+91 {b.customerPhone}</p> : <p className="inv__it">Walk-in Counter Sale</p>}
       </section>
 
       <table className="inv__tbl">
         <thead>
           <tr>
-            <th>#</th>
-            <th>Item</th>
-            <th className="n">Qty</th>
-            <th className="n">Rate</th>
-            <th className="n">Amount</th>
+            <th className="c">#</th>
+            <th>Item Description</th>
+            <th className="c">Qty</th>
+            <th className="n">Rate (₹)</th>
+            <th className="n">Amount (₹)</th>
           </tr>
         </thead>
         <tbody>
           {b.items.map((i, k) => (
             <tr key={k}>
-              <td>{k + 1}</td>
-              <td>{i.free ? <b>FREE GIFT · {i.name}</b> : i.name}</td>
-              <td className="n">{i.qty}</td>
-              <td className="n">{i.free ? "FREE" : rupee(i.price)}</td>
-              <td className="n">{i.free ? "₹0" : rupee(i.qty * i.price)}</td>
+              <td className="c inv__mono">{k + 1}</td>
+              <td>
+                <b>{i.free ? `FREE GIFT · ${i.name}` : i.name}</b>
+              </td>
+              <td className="c">{i.qty}</td>
+              <td className="n inv__mono">{i.free ? "FREE" : inr(i.price)}</td>
+              <td className="n inv__mono">
+                <b>{i.free ? "0.00" : inr(i.qty * i.price)}</b>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      <dl className="inv__sum">
-        <div>
-          <dt>Subtotal ({b.itemCount} items)</dt>
-          <dd>{rupee(b.subtotal)}</dd>
-        </div>
-        {b.couponDiscount > 0 && (
-          <div>
-            <dt>
-              Coupon {b.couponCode} ({b.couponPercent}%)
-            </dt>
-            <dd>-{rupee(b.couponDiscount)}</dd>
-          </div>
-        )}
-        {b.manualDiscount > 0 && (
-          <div>
-            <dt>Discount</dt>
-            <dd>-{rupee(b.manualDiscount)}</dd>
-          </div>
-        )}
-        {b.rewardDiscount > 0 && (
-          <div>
-            <dt>Reward {b.rewardName}</dt>
-            <dd>-{rupee(b.rewardDiscount)}</dd>
-          </div>
-        )}
-        {b.pointsDiscount > 0 && (
-          <div>
-            <dt>Loyalty points ({b.pointsRedeemed} pts)</dt>
-            <dd>-{rupee(b.pointsDiscount)}</dd>
-          </div>
-        )}
-        {b.extra > 0 && (
-          <div>
-            <dt>Extra charges</dt>
-            <dd>{rupee(b.extra)}</dd>
-          </div>
-        )}
-        {b.isGst && (
-          <div>
-            <dt>GST ({b.gstPercent}%) on {rupee(b.taxableAmount)}</dt>
-            <dd>{rupee(b.gstAmount)}</dd>
-          </div>
-        )}
-        <div className="inv__tot">
-          <dt>Grand total</dt>
-          <dd>{rupee(b.total)}</dd>
-        </div>
-        {b.payment === "split" ? (
-          payParts(b).map(([m, n]) => (
-            <div key={m}>
-              <dt>Received · {m}</dt>
-              <dd>{rupee(n)}</dd>
+      <div className="inv__bottom">
+        <div className="inv__left">
+          <span className="inv__lbl">Amount in words</span>
+          <p className="inv__words">{numberToWords(b.total)}</p>
+          {b.payment === "split" && (
+            <div className="inv__pay">
+              {payParts(b).map(([m, n]) => (
+                <p key={m}>
+                  Paid by {m}: <b className="inv__mono">₹{inr(n)}</b>
+                </p>
+              ))}
             </div>
-          ))
-        ) : (
-          <div>
-            <dt>Received · {payLabel(b)}</dt>
-            <dd>{rupee(b.received)}</dd>
+          )}
+          {b.payment === "cash" && b.received > 0 && (
+            <div className="inv__pay">
+              <p>
+                Cash Received: <b className="inv__mono">₹{inr(b.received)}</b>
+              </p>
+              {b.change > 0 && (
+                <p>
+                  Change Returned: <b className="inv__mono">₹{inr(b.change)}</b>
+                </p>
+              )}
+            </div>
+          )}
+          <div className="inv__terms">
+            <p>
+              <b>Terms &amp; Notes:</b>
+            </p>
+            <p>{b.isGst ? `• Prices are in Indian Rupees; GST @ ${b.gstPercent}% is added to the amount.` : "• Prices are in Indian Rupees. GST is not applicable on this bill."}</p>
+            <p>• Please keep this invoice for your records.</p>
           </div>
-        )}
-        {b.change > 0 && (
-          <div>
-            <dt>Change</dt>
-            <dd>{rupee(b.change)}</dd>
-          </div>
-        )}
-      </dl>
+        </div>
 
-      {loyaltySummary(b) && (
-        <dl className="inv__sum" aria-label="Loyalty summary">
+        <dl className="inv__sum">
           <div>
-            <dt>
-              <b>Loyalty summary</b>
-            </dt>
-            <dd />
+            <dt>Subtotal ({b.itemCount} items)</dt>
+            <dd>₹{inr(b.subtotal)}</dd>
           </div>
-          {loyaltySummary(b)!.map(([k, v]) => (
+          {b.couponDiscount > 0 && (
+            <div>
+              <dt>
+                Coupon {b.couponCode} ({b.couponPercent}%)
+              </dt>
+              <dd>− ₹{inr(b.couponDiscount)}</dd>
+            </div>
+          )}
+          {b.manualDiscount > 0 && (
+            <div>
+              <dt>Discount {b.manualType === "percent" ? `(${b.manualValue}%)` : ""}</dt>
+              <dd>− ₹{inr(b.manualDiscount)}</dd>
+            </div>
+          )}
+          {b.rewardDiscount > 0 && (
+            <div>
+              <dt>Reward {b.rewardName}</dt>
+              <dd>− ₹{inr(b.rewardDiscount)}</dd>
+            </div>
+          )}
+          {b.pointsDiscount > 0 && (
+            <div>
+              <dt>Loyalty points ({b.pointsRedeemed} pts)</dt>
+              <dd>− ₹{inr(b.pointsDiscount)}</dd>
+            </div>
+          )}
+          {b.extra > 0 && (
+            <div className="inv__sep">
+              <dt>Extra charges</dt>
+              <dd>₹{inr(b.extra)}</dd>
+            </div>
+          )}
+          {b.isGst && (
+            <>
+              <div className="inv__sep">
+                <dt>Taxable amount</dt>
+                <dd>₹{inr(b.taxableAmount)}</dd>
+              </div>
+              <div>
+                <dt>GST ({b.gstPercent}%)</dt>
+                <dd>₹{inr(b.gstAmount)}</dd>
+              </div>
+            </>
+          )}
+          <div className="inv__tot">
+            <dt>TOTAL</dt>
+            <dd>₹{inr(b.total)}</dd>
+          </div>
+        </dl>
+      </div>
+
+      {loy && (
+        <div className="inv__loy">
+          <b>LOYALTY SUMMARY</b>
+          {loy.map(([k, v]) => (
             <div key={k}>
-              <dt>{k}</dt>
-              <dd>{v}</dd>
+              <span>{k}</span>
+              <b className="inv__mono">{v}</b>
             </div>
           ))}
-        </dl>
+        </div>
       )}
 
-      <footer className="inv__foot">Thank you for visiting — see you again soon!</footer>
+      <footer className="inv__foot">
+        <span>Thank you for visiting! • {shop}</span>
+        <div className="inv__sign">
+          <i />
+          <b>Authorised Signatory</b>
+          <small>For {shop}</small>
+        </div>
+      </footer>
     </div>
   );
 }
