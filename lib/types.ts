@@ -49,6 +49,10 @@ export type OrderItem = {
   name: string;
   price: number;
   qty: number;
+  /** A free gift line (loyalty reward or bill offer): always ₹0, never earns points, and its stock is
+      recorded as a "free gift" movement. `gift` says what it came from, e.g. "Spend ₹500 get a Juice". */
+  free?: boolean;
+  gift?: string;
 };
 
 export type OrderStatus = "new" | "preparing" | "served" | "cancelled";
@@ -132,6 +136,9 @@ export type Bill = {
   rewardName: string | null;
   rewardDiscount: number;
   pointsEarned: number;
+  /** the member's points just before / after this bill (null without a member) — printed on the receipt */
+  loyaltyPrev: number | null;
+  loyaltyBalance: number | null;
   createdAt: number;
 };
 
@@ -224,6 +231,10 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   "loyalty.maintain": "Ran loyalty housekeeping",
   "loyalty.config": "Changed loyalty settings",
   "loyalty.reward.save": "Saved a reward",
+  "loyalty.offer.save": "Saved a bill offer",
+  "loyalty.offer.delete": "Removed a bill offer",
+  "loyalty.msg.open": "Opened a loyalty WhatsApp message",
+  "loyalty.msg.retry": "Retried a loyalty WhatsApp message",
   "loyalty.reward.delete": "Removed a reward",
   "loyalty.campaign.save": "Saved a campaign",
   "loyalty.campaign.delete": "Removed a campaign",
@@ -308,7 +319,8 @@ export type ExpenseCategory = {
   createdAt: number;
 };
 
-export type StockMoveType = "initial" | "added" | "removed" | "sale" | "cancelled_order" | "void_bill" | "adjustment";
+/** "gift" = a free gift handed out on a bill (loyalty reward or bill offer) */
+export type StockMoveType = "initial" | "added" | "removed" | "sale" | "cancelled_order" | "void_bill" | "adjustment" | "gift";
 
 /** One page of the stock ledger plus totals for the whole selected period. */
 export type StockLedger = {
@@ -316,7 +328,7 @@ export type StockLedger = {
   total: number;
   page: number;
   pages: number;
-  stats: { added: number; sold: number; removed: number; returned: number; adjusted: number; net: number };
+  stats: { added: number; sold: number; removed: number; returned: number; adjusted: number; /** free gifts handed out */ gifts: number; net: number };
   perProduct: { id: string; name: string; in: number; out: number; close: number | null }[];
   products: { id: string; name: string }[];
 };
@@ -502,7 +514,7 @@ export type AdminState = Omit<DB, "settings" | "users"> & {
   settings: ShopDetails & { shopName: string; publicUrl: string; walkInsOnly: boolean; kotEnabled: boolean; orderingEnabled: boolean; upiId: string; upiName: string; upiPhone: string; upiQrMinutes: number };
   users: PublicUser[];
   /** how loyalty points are earned, so each item can show what it earns */
-  loyaltyEarn: Pick<LoyaltyConfig, "enabled" | "earn">;
+  loyaltyEarn: Pick<LoyaltyConfig, "enabled" | "earn" | "display">;
 };
 
 /** A tab that closed in the last few minutes — "paid" once it was billed, "cleared"

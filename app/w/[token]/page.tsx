@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { walletView } from "@/lib/loyalty/server";
-import { nextTier, pointsValue, tierByKey } from "@/lib/loyalty/engine";
+import { pointsValue } from "@/lib/loyalty/engine";
 import { rupee } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
@@ -27,11 +27,6 @@ export default async function WalletPage({ params }: { params: Promise<{ token: 
   }
   const c = w.customer;
   const cfg = w.config;
-  const tier = tierByKey(c.tier, cfg);
-  const next = nextTier(c.lifetime, cfg);
-  const size = cfg.stamps.milestones.at(-1)?.visits ?? 0;
-  const pos = c.stamps && size ? ((c.stamps - 1) % size) + 1 : 0;
-  const nextMs = cfg.stamps.milestones.find((m) => m.visits > pos);
   const ready = w.vouchers.filter((v) => v.status === "issued");
 
   return (
@@ -48,40 +43,10 @@ export default async function WalletPage({ params }: { params: Promise<{ token: 
                 <p className="text-[44px] font-black leading-none">{c.available}</p>
                 <p className="text-[13px] text-slate-300">points · worth {rupee(pointsValue(c.available, cfg))}</p>
               </div>
-              <span className="rounded-full bg-amber-400 px-3 py-1 text-[12px] font-extrabold uppercase tracking-wide text-slate-900">{tier.name}</span>
             </div>
-            {next && (
-              <div className="mt-4">
-                <div className="h-2 overflow-hidden rounded-full bg-white/15">
-                  <div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.min(100, ((c.lifetime - tier.min) / (next.tier.min - tier.min)) * 100)}%` }} />
-                </div>
-                <p className="mt-1 text-[12px] text-slate-400">
-                  {next.need} more points to {next.tier.name}
-                </p>
-              </div>
-            )}
           </div>
-          <p className="bg-[#6b7550] px-6 py-3 text-[12.5px] font-semibold">{tier.benefits}</p>
         </div>
         {c.status !== "active" && <p className="rounded-xl bg-amber-50 px-4 py-3 text-[13px] font-semibold text-amber-800">This loyalty account is paused. Ask at the counter.</p>}
-
-        {cfg.stamps.enabled && size > 0 && (
-          <section className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="mb-3 text-[14px] font-bold">Visit stamps</h2>
-            <div className="flex flex-wrap gap-1.5">
-              {Array.from({ length: size }, (_, i) => (
-                <span key={i} className={`grid h-8 w-8 place-items-center rounded-full border-2 text-[11px] font-bold ${i < pos ? "border-[#6b7550] bg-[#6b7550] text-white" : cfg.stamps.milestones.some((m) => m.visits === i + 1) ? "border-amber-400 text-amber-600" : "border-slate-200 text-slate-400"}`}>
-                  {i + 1}
-                </span>
-              ))}
-            </div>
-            {nextMs && (
-              <p className="mt-2 text-[12.5px] text-slate-500">
-                {nextMs.visits - pos} more visit{nextMs.visits - pos === 1 ? "" : "s"} to {nextMs.reward.name}
-              </p>
-            )}
-          </section>
-        )}
 
         {ready.length > 0 && (
           <section className="rounded-2xl bg-white p-5 shadow-sm">

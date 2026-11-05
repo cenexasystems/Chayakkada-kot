@@ -1,89 +1,106 @@
 "use client";
 
-/* After something changes on a member's account — enrolment, points earned or used, a tier
-   upgrade, an adjustment, a reward, a status change — this offers the message to send them on
-   WhatsApp. It reads the member's live balance and tier, fills the wording set in Loyalty →
-   Settings → WhatsApp messages, and lets staff tweak it before sending. A browser can't send
-   WhatsApp by itself, so one tap opens the chat with the message ready. */
+/* WhatsApp messages for loyalty customers. The server prepares each message when something happens (a welcome, points
+   earned, a gift claimed…) and keeps it in the customer's history. There is no automatic sender — a browser can't drive
+   WhatsApp — so one tap here opens the chat with the message ready. WhatsApp doesn't tell us whether it was delivered, so
+   a message is only ever shown as "Ready to send" or "Opened in WhatsApp", never as "Sent". */
 
-import { useEffect, useMemo, useState } from "react";
-import { shopToday } from "@/lib/money";
-import { DEFAULT_CONFIG, type MessageKey } from "@/lib/loyalty/config";
-import { tierByKey } from "@/lib/loyalty/engine";
-import { fillMessage } from "@/lib/loyalty/messages";
-import type { LoyaltyLookup } from "@/lib/loyalty/types";
+import { useState } from "react";
+import type { LoyaltyMessage } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
-import { waLink } from "../receipt";
-import { Btn, Field, Modal, WaIcon, cx, inputLineCls } from "../kit";
-import { fetchLookup } from "./billing";
+import { Badge, Btn, Modal, WaIcon, fmtDateTime } from "../kit";
 
-export type MemberNotice = {
-  phone: string;
-  name: string;
-  kind: MessageKey;
-  /** extra words for the template: points, reason, reward, ref, expires, status… */
-  vars?: Record<string, string | number>;
-  /** the member's tier before this bill — if it changed, the tier-upgrade message is used */
-  tierBefore?: string;
+export const MSG_LABEL: Record<string, string> = {
+  enrol: "Welcome",
+  earned: "Points earned",
+  redeemed: "Points used",
+  unlock: "Reward unlocked",
+  claimed: "Free gift claimed",
+  milestone: "Spending reward unlocked",
+  adjust: "Points adjusted",
 };
 
-export function MemberUpdate({ phone, name, kind, vars, tierBefore, onClose }: MemberNotice & { onClose: () => void }) {
-  const { s } = useAdmin();
-  const [lk, setLk] = useState<LoyaltyLookup | null | undefined>(undefined);
-  const [edited, setEdited] = useState<string | null>(null); // what staff typed over the ready-made message
+export const waUrl = (m: Pick<LoyaltyMessage, "phone" | "text">) => `https://wa.me/${m.phone}?text=${encodeURIComponent(m.text)}`;
 
-  useEffect(() => {
-    let live = true;
-    fetchLookup(phone).then((x) => live && setLk(x));
-    return () => {
-      live = false;
-    };
-  }, [phone]);
+/** Opens WhatsApp with a message and records that staff did so. */
+export function useSendMessage(onDone?: (m: LoyaltyMessage) => void) {
+  const { act } = useAdmin();
+  return async (m: LoyaltyMessage) => {
+    const w = window.open("about:blank", "_blank"); // opened first so the browser doesn't block it
+    const r = await act<LoyaltyMessage>("loyalty.msg.open", { id: m.id });
+    if (r.ok) {
+      if (w) w.location.href = waUrl(m);
+      onDone?.(r.result);
+    } else w?.close();
+  };
+}
 
-  const cfg = lk?.config ?? DEFAULT_CONFIG;
-  const off = lk !== undefined && !cfg.messages.enabled;
-  useEffect(() => {
-    if (off) onClose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [off]);
+export function StatusBadge({ m }: { m: Pick<LoyaltyMessage, "status" | "opens"> }) {
+  if (m.status === "failed") return <Badge tone="red">Failed</Badge>;
+  if (m.status === "opened") return <Badge tone="sky">Opened in WhatsApp{m.opens > 1 ? ` ×${m.opens}` : ""}</Badge>;
+  return <Badge tone="amber">Ready to send</Badge>;
+}
 
-  // the ready-made message, once the member's live balance and tier are known
-  const made = useMemo(() => {
-    if (lk === undefined || off) return null;
-    const c = lk?.customer;
-    const tier = c ? tierByKey(c.tier, cfg) : null;
-    const k: MessageKey = kind === "earned" && tierBefore && c && c.tier !== tierBefore ? "tier" : kind;
-    const [y, m, d] = shopToday().split("-").map(Number);
-    const base = (s.settings.publicUrl || (typeof window !== "undefined" ? window.location.origin : "")).replace(/\/$/, "");
-    return fillMessage(cfg.messages.templates[k], {
-      name: (c?.name ?? name).split(" ")[0],
-      shop: s.settings.shopName,
-      date: `${d}/${m}/${y}`,
-      balance: c?.available,
-      tier: tier?.name,
-      benefits: tier?.benefits,
-      code: c?.code,
-      wallet: c ? `${base}/w/${c.walletToken}` : "",
-      ...vars,
-    });
-  }, [lk, off, kind, tierBefore, cfg, name, vars, s.settings.publicUrl, s.settings.shopName]);
-  const text = edited ?? made;
-
-  if (off) return null;
+export function MessageRow({ m: given, onChanged }: { m: LoyaltyMessage; onChanged?: () => void }) {
+  const { act, role } = useAdmin();
+  const [local, setLocal] = useState<LoyaltyMessage | null>(null); // what this row last did, until the list reloads
+  const m = local && local.id === given.id && local.opens >= given.opens ? local : given;
+  const send = useSendMessage((x) => {
+    setLocal(x);
+    onChanged?.();
+  });
+  const retry = async () => {
+    const r = await act<LoyaltyMessage>("loyalty.msg.retry", { id: m.id });
+    if (r.ok) {
+      setLocal(r.result);
+      onChanged?.();
+    }
+  };
   return (
-    <Modal open onClose={onClose} title={`Tell ${name.split(" ")[0] || "the member"} on WhatsApp`} footer={<Btn onClick={onClose}>Done</Btn>}>
-      {text === null ? (
-        <p className="py-6 text-center text-[13px] text-slate-400">Getting their latest points…</p>
-      ) : (
-        <div className="space-y-3">
-          <Field label="Message" hint="Edit it if you like — the wording itself is set in Loyalty → Settings → WhatsApp messages.">
-            <textarea className={cx(inputLineCls, "h-32 resize-y py-2.5 leading-relaxed")} value={text} maxLength={1000} onChange={(e) => setEdited(e.target.value)} />
-          </Field>
-          <a href={waLink(phone, text)} target="_blank" rel="noopener noreferrer" className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#22c55e] px-5 text-[14px] font-bold text-white hover:bg-[#16a34a]">
-            <WaIcon size={18} /> Send on WhatsApp
-          </a>
-        </div>
-      )}
+    <li className="rounded-xl border border-slate-100 bg-white p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex flex-wrap items-center gap-2">
+          <b className="text-[13px] text-slate-900">{MSG_LABEL[m.type] ?? m.type}</b>
+          <StatusBadge m={m} />
+        </span>
+        <span className="text-[11.5px] text-slate-500">{fmtDateTime(m.createdAt)}</span>
+      </div>
+      <p className="mt-1.5 whitespace-pre-line text-[12.5px] leading-snug text-slate-600">{m.text}</p>
+      {m.status === "failed" && <p className="mt-1.5 text-[12px] font-semibold text-red-600">{m.error}</p>}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {m.status !== "failed" && (
+          <Btn size="sm" kind="green" onClick={() => send(m)}>
+            <WaIcon size={14} /> {m.status === "opened" ? "Open again" : "Send on WhatsApp"}
+          </Btn>
+        )}
+        {m.status === "failed" && role === "admin" && (
+          <Btn size="sm" onClick={retry}>
+            Retry
+          </Btn>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** A small list of messages (a customer's history, or the ones prepared for one bill). */
+export function MessageList({ messages, onChanged, empty = "No WhatsApp messages yet." }: { messages: LoyaltyMessage[]; onChanged?: () => void; empty?: string }) {
+  if (!messages.length) return <p className="py-3 text-center text-[12.5px] text-slate-400">{empty}</p>;
+  return (
+    <ul className="space-y-2">
+      {messages.map((m) => (
+        <MessageRow key={m.id} m={m} onChanged={onChanged} />
+      ))}
+    </ul>
+  );
+}
+
+/** Pop-up shown right after something prepared a message (enrolment, a points adjustment). */
+export function MessageModal({ messages, title, onClose }: { messages: LoyaltyMessage[]; title: string; onClose: () => void }) {
+  return (
+    <Modal open onClose={onClose} title={title} footer={<Btn onClick={onClose}>Done</Btn>}>
+      <p className="mb-3 text-[12.5px] text-slate-500">This is saved in the customer&apos;s WhatsApp history too. WhatsApp can&apos;t confirm delivery, so it is marked &ldquo;Opened in WhatsApp&rdquo; once you open it.</p>
+      <MessageList messages={messages} />
     </Modal>
   );
 }

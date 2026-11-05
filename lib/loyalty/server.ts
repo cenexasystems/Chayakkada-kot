@@ -13,16 +13,19 @@
    - Nothing here trusts amounts from the browser: points, values and eligibility are
      recomputed from the database. */
 
-import { and, asc, desc, eq, gt, gte, inArray, isNotNull, like, lt, lte, ne, or, sql, ilike } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, like, lt, lte, or, sql, ilike } from "drizzle-orm";
 import { db, type Db, type Tx } from "../db";
-import { bills, loyaltyAudit, loyaltyCampaigns, loyaltyCustomers, loyaltyLedger, loyaltyLots, loyaltyReferrals, loyaltyRewards, loyaltySettings, loyaltyStamps, loyaltyVouchers, products, settings } from "../db/schema";
+import { bills, giftOffers, loyaltyAudit, loyaltyCustomers, loyaltyLedger, loyaltyLots, loyaltyMessages, loyaltyReferrals, loyaltyRewards, loyaltySettings, loyaltyStamps, loyaltyVouchers, products, settings } from "../db/schema";
 import { ApiError } from "../store";
 import { code, uid } from "../seed";
-import { round2 } from "../money";
+import { round2, shopToday } from "../money";
 import type { Bill, OrderItem } from "../types";
-import { DEFAULT_CONFIG, TIER_KEYS, sanitizeConfig, type AutoReward, type LoyaltyConfig, type RewardKind, type TierKey } from "./config";
-import { campaignApplies, earnFor, eligibleSubtotal, occasionYear, pointsValue, redeemCap, rewardAvailable, rewardValue, segmentOf, shopDate, statsFrom, tierFor, tierOk, voucherLive, type CatOf } from "./engine";
-import type { Campaign, LedgerEntry, LedgerType, LoyaltyCustomer, LoyaltyLookup, LoyaltyState, PurchaseStats, Reward, Segment, Voucher, VoucherSource } from "./types";
+import { DEFAULT_CONFIG, rangesValid, sanitizeConfig, type LoyaltyConfig, type MessageKey } from "./config";
+import { earnFor, pointsValue, redeemCap, rewardAvailable, rewardValue, shopDate, tierFor, voucherLive, type CatOf } from "./engine";
+import { giftProblems, offerEntitlements, type Entitlement } from "./gifts";
+import { fillMessage } from "./messages";
+import type { GiftOffer, LedgerEntry, LedgerType, LoyaltyCustomer, LoyaltyLookup, LoyaltyMessage, LoyaltyState, Reward, Voucher, VoucherSource } from "./types";
+import type { RewardKind } from "./config";
 
 type Q = Db | Tx;
 type Args = Record<string, unknown>;
@@ -33,10 +36,7 @@ const num = (v: unknown) => {
   const x = typeof v === "string" && v.trim() === "" ? NaN : Number(v);
   return Number.isFinite(x) ? x : NaN;
 };
-const optInt = (v: unknown) => (v === null || v === undefined || v === "" ? null : Math.floor(num(v)));
 const first = async <T>(rows: Promise<T[]>): Promise<T | null> => (await rows)[0] ?? null;
-const strs = (v: unknown, max = 100) => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim().slice(0, 80)))].slice(0, max) : []);
-const tiersOf = (v: unknown): TierKey[] => strs(v).filter((x) => /^[a-z0-9_-]{1,20}$/.test(x));
 const day = (v: unknown) => {
   const x = str(v, 10);
   if (x && !/^\d{4}-\d{2}-\d{2}$/.test(x)) throw new ApiError("Dates should be picked from the calendar.");
@@ -49,15 +49,6 @@ export function mobile(v: unknown): string | null {
   if (!d) return "";
   const ten = d.length === 12 && d.startsWith("91") ? d.slice(2) : d.length === 11 && d.startsWith("0") ? d.slice(1) : d;
   return /^[6-9]\d{9}$/.test(ten) ? ten : null;
-}
-
-/** YYYY-MM-DD or MM-DD (year unknown). */
-function occasionDate(v: unknown, label: string) {
-  const x = str(v, 10);
-  if (!x) return "";
-  const m = /^(?:(\d{4})-)?(\d{2})-(\d{2})$/.exec(x);
-  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12 || Number(m[3]) < 1 || Number(m[3]) > 31) throw new ApiError(`${label} should be a valid date.`);
-  return x;
 }
 
 const SYSTEM = "system";
@@ -108,49 +99,46 @@ async function billsOf(q: Q, phone: string) {
   return q.select({ id: bills.id, total: bills.total, createdAt: bills.createdAt, status: bills.status, customerName: bills.customerName }).from(bills).where(eq(bills.customerPhone, phone)).orderBy(desc(bills.createdAt));
 }
 
-export async function statsForPhone(q: Q, phone: string, cfg: LoyaltyConfig): Promise<PurchaseStats> {
-  return statsFrom(await billsOf(q, phone), cfg.crm.frequentDays);
+/** What a customer has spent in total, from their paid bills: after every discount, without GST or extra charges,
+    and without free gifts (their price is ₹0). Drives the spending-milestone rewards. `skipBill` leaves one bill out. */
+export async function spendOf(q: Q, phone: string, skipBill?: string, since = 0): Promise<number> {
+  const rows = await q.select({ id: bills.id, subtotal: bills.subtotal, discount: bills.discount }).from(bills).where(and(eq(bills.customerPhone, phone), eq(bills.status, "completed"), gte(bills.createdAt, since)));
+  return round2(rows.filter((b) => b.id !== skipBill).reduce((a, b) => a + Math.max(0, b.subtotal - b.discount), 0));
 }
 
-export async function registerCustomer(tx: Tx, a: Args, actor: string): Promise<LoyaltyCustomer> {
-  const cfg = await getConfig(tx);
+/** The number a customer's WhatsApp messages go to, as a wa.me number (91XXXXXXXXXX), or null if it isn't usable. */
+export function waNumber(c: Pick<LoyaltyCustomer, "phone" | "whatsapp">): string | null {
+  const n = mobile(c.whatsapp || c.phone);
+  return n ? `91${n}` : null;
+}
+
+export async function registerCustomer(tx: Tx, a: Args, actor: string): Promise<LoyaltyCustomer & { message: LoyaltyMessage | null }> {
   const phone = mobile(a.phone);
   if (!phone) throw new ApiError("Enter the customer's 10-digit mobile number.");
   const existing = await byPhone(tx, phone);
-  if (existing) throw new ApiError(`${phone} is already a member (${existing.code}).`);
-  const email = str(a.email, 120);
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError("That email address doesn't look right.");
+  if (existing) throw new ApiError(`${phone} is already a loyalty customer (${existing.name}).`);
   const history = await billsOf(tx, phone);
   const name = str(a.name, 60) || history.find((b) => b.customerName && b.customerName !== "Walk-in customer")?.customerName || "";
   if (!name) throw new ApiError("Enter the customer's name.");
+  const wa = a.whatsapp === undefined || str(a.whatsapp, 24) === "" ? "" : mobile(a.whatsapp);
+  if (wa === null) throw new ApiError("The WhatsApp number should be a 10-digit number.");
   const now = Date.now();
-
-  // referral: only for someone new to the shop, and never their own code
-  const refCode = str(a.referralCode, 20).toUpperCase().replace(/[^A-Z0-9]/g, "");
-  let referrer: LoyaltyCustomer | null = null;
-  if (refCode) {
-    if (!cfg.referral.enabled) throw new ApiError("Referrals are switched off right now.");
-    referrer = await first(tx.select().from(loyaltyCustomers).where(eq(loyaltyCustomers.referralCode, refCode)));
-    if (!referrer) throw new ApiError(`Referral code ${refCode} doesn't exist.`);
-    if (referrer.phone === phone) throw new ApiError("A customer can't refer themselves.");
-    if (referrer.status !== "active") throw new ApiError("That referral code's member account isn't active.");
-    if (history.some((b) => b.status === "completed")) throw new ApiError("Referral codes are for new customers — this number has visited before.");
-  }
-
   const c: LoyaltyCustomer = {
     id: uid(),
     code: await uniqueValue(tx, () => `CK${code(6)}`, loyaltyCustomers.code),
     phone,
     name,
-    email,
-    birthday: occasionDate(a.birthday, "Birthday"),
-    anniversary: occasionDate(a.anniversary, "Anniversary"),
+    email: "",
+    birthday: "",
+    anniversary: "",
     status: "active",
-    consent: a.consent !== false,
+    /* WhatsApp messages only go to a customer who has explicitly said yes */
+    consent: a.consent === true,
+    whatsapp: wa === phone ? "" : wa,
     referralCode: await uniqueValue(tx, () => code(7), loyaltyCustomers.referralCode),
-    referredBy: referrer?.id ?? null,
+    referredBy: null,
     walletToken: await uniqueValue(tx, () => uid(24), loyaltyCustomers.walletToken),
-    tier: cfg.tiers[0].key,
+    tier: "member",
     tierSince: now,
     available: 0,
     lifetime: 0,
@@ -163,10 +151,9 @@ export async function registerCustomer(tx: Tx, a: Args, actor: string): Promise<
     updatedAt: now,
   };
   await tx.insert(loyaltyCustomers).values(c);
-  if (referrer) await tx.insert(loyaltyReferrals).values({ id: uid(), referrerId: referrer.id, refereeId: c.id, status: "pending", billId: null, referrerPoints: 0, refereePoints: 0, createdAt: now, rewardedAt: null });
-  await audit(tx, actor, "customer.register", { customerId: c.id, ref: c.code, after: { name, phone, referredBy: referrer?.code ?? null } });
-  await grantOccasions(tx, c, cfg, now);
-  return c;
+  await audit(tx, actor, "customer.register", { customerId: c.id, ref: c.code, after: { name, phone, whatsapp: c.whatsapp, consent: c.consent } });
+  const message = await queueMessage(tx, c, "enrol", {}, `enrol:${c.id}`, null, now);
+  return { ...c, message };
 }
 
 /** Removes a member from the loyalty programme for good: their points history and balances, point lots, rewards,
@@ -184,6 +171,7 @@ export async function deleteCustomer(tx: Tx, a: Args, actor: string) {
   await tx.update(loyaltyCustomers).set({ referredBy: null }).where(eq(loyaltyCustomers.referredBy, c.id));
   await tx.update(bills).set({ loyaltyCustomerId: null }).where(eq(bills.loyaltyCustomerId, c.id));
   await tx.delete(loyaltyAudit).where(eq(loyaltyAudit.customerId, c.id));
+  await tx.delete(loyaltyMessages).where(eq(loyaltyMessages.customerId, c.id));
   await tx.delete(loyaltyCustomers).where(eq(loyaltyCustomers.id, c.id));
   await audit(tx, actor, "customer.delete", { ref: c.code, before: { name: c.name, phone: c.phone, tier: c.tier, pointsHeld: held, lifetime: c.lifetime }, reason: str(a.reason, 300) });
   return { id: c.id, name: c.name };
@@ -191,19 +179,17 @@ export async function deleteCustomer(tx: Tx, a: Args, actor: string) {
 
 export async function updateCustomer(tx: Tx, a: Args, actor: string): Promise<LoyaltyCustomer> {
   const c = await mustCustomer(tx, str(a.id, 40));
-  const email = a.email === undefined ? c.email : str(a.email, 120);
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError("That email address doesn't look right.");
+  const wa = a.whatsapp === undefined ? c.whatsapp : str(a.whatsapp, 24) === "" ? "" : mobile(a.whatsapp);
+  if (wa === null) throw new ApiError("The WhatsApp number should be a 10-digit number.");
   const patch = {
     name: a.name === undefined ? c.name : str(a.name, 60) || c.name,
-    email,
-    birthday: a.birthday === undefined ? c.birthday : occasionDate(a.birthday, "Birthday"),
-    anniversary: a.anniversary === undefined ? c.anniversary : occasionDate(a.anniversary, "Anniversary"),
+    whatsapp: wa === c.phone ? "" : wa,
     consent: typeof a.consent === "boolean" ? a.consent : c.consent,
     note: a.note === undefined ? c.note : str(a.note, 300),
     updatedAt: Date.now(),
   };
   const [u] = await tx.update(loyaltyCustomers).set(patch).where(eq(loyaltyCustomers.id, c.id)).returning();
-  await audit(tx, actor, "customer.update", { customerId: c.id, ref: c.code, before: { name: c.name, email: c.email, birthday: c.birthday, anniversary: c.anniversary, consent: c.consent, note: c.note }, after: { name: u.name, email: u.email, birthday: u.birthday, anniversary: u.anniversary, consent: u.consent, note: u.note } });
+  await audit(tx, actor, "customer.update", { customerId: c.id, ref: c.code, before: { name: c.name, whatsapp: c.whatsapp, consent: c.consent, note: c.note }, after: { name: u.name, whatsapp: u.whatsapp, consent: u.consent, note: u.note } });
   return u;
 }
 
@@ -310,15 +296,12 @@ async function post(tx: Tx, c: LoyaltyCustomer, p: Post, cfg: LoyaltyConfig, now
   if (p.type === "debt_recovery") c.debt = Math.max(0, c.debt + pts);
 
   const t = tierFor(c.lifetime, cfg).key;
-  const tierChanged = t !== c.tier;
-  const oldTier = c.tier;
-  if (tierChanged) {
+  if (t !== c.tier) {
     c.tier = t;
     c.tierSince = now;
   }
   c.updatedAt = now;
   await tx.update(loyaltyCustomers).set({ available: c.available, lifetime: c.lifetime, redeemed: c.redeemed, expired: c.expired, debt: c.debt, tier: c.tier, tierSince: c.tierSince, updatedAt: now }).where(eq(loyaltyCustomers.id, c.id));
-  if (tierChanged) await audit(tx, SYSTEM, "tier.change", { customerId: c.id, ref: c.code, before: { tier: oldTier }, after: { tier: t, lifetime: c.lifetime } });
 
   // new points first pay back points a refund couldn't take
   if (pts > 0 && c.debt > 0 && p.type !== "refund_restore") {
@@ -348,7 +331,7 @@ async function newRef(tx: Tx) {
   }
 }
 
-async function issueVoucher(tx: Tx, c: LoyaltyCustomer, x: { name: string; kind: RewardKind; value: number; productId: string | null; source: VoucherSource; key: string; validityDays: number; note?: string; rewardId?: string | null; pointsCost?: number; status?: "issued" | "used"; billId?: string | null; invoiceNo?: string | null }, now = Date.now()) {
+async function issueVoucher(tx: Tx, c: LoyaltyCustomer, x: { name: string; kind: RewardKind; value: number; productId: string | null; source: VoucherSource; key: string; validityDays: number; note?: string; rewardId?: string | null; pointsCost?: number; giftQty?: number; status?: "issued" | "used"; billId?: string | null; invoiceNo?: string | null }, now = Date.now()) {
   if (await first(tx.select({ id: loyaltyVouchers.id }).from(loyaltyVouchers).where(eq(loyaltyVouchers.key, x.key)))) return null;
   const v: Voucher = {
     id: uid(),
@@ -361,6 +344,7 @@ async function issueVoucher(tx: Tx, c: LoyaltyCustomer, x: { name: string; kind:
     productId: x.productId,
     source: x.source,
     pointsCost: x.pointsCost ?? 0,
+    giftQty: x.giftQty ?? 1,
     status: x.status ?? "issued",
     billId: x.billId ?? null,
     invoiceNo: x.invoiceNo ?? null,
@@ -374,27 +358,92 @@ async function issueVoucher(tx: Tx, c: LoyaltyCustomer, x: { name: string; kind:
   return v;
 }
 
-const autoVoucher = (r: AutoReward) => (r.kind === "none" ? null : { name: r.name || (r.kind === "percent" ? `${r.value}% off` : r.kind === "amount" ? `₹${r.value} off` : "Free item"), kind: r.kind, value: r.value, productId: r.productId });
+/* ================================ WhatsApp messages ================================ */
 
-/* ================================ occasions ================================ */
+/** Prepares a WhatsApp message for a customer and records it in their history. Nothing is sent from here — the
+    owner's WhatsApp can't be driven by the server — so a message waits as "pending" until staff open it.
+    Returns null when messages are off for this kind, the customer hasn't agreed, or this event was already recorded
+    (`key` prevents duplicates). A number that can't receive WhatsApp is recorded as "failed" with the reason. */
+export async function queueMessage(tx: Tx, c: LoyaltyCustomer, type: MessageKey, vars: Record<string, string | number | null | undefined>, key: string, billId: string | null = null, now = Date.now()): Promise<LoyaltyMessage | null> {
+  const cfg = await getConfig(tx);
+  if (!cfg.enabled || !cfg.messages.enabled || !cfg.messages.events[type]) return null;
+  if (!c.consent) return null;
+  if (await first(tx.select({ id: loyaltyMessages.id }).from(loyaltyMessages).where(eq(loyaltyMessages.key, key)))) return null;
+  const shop = await first(tx.select({ n: settings.shopName, url: settings.publicUrl }).from(settings).where(eq(settings.id, 1)));
+  const [dd, mm, yy] = shopToday().split("-").reverse();
+  const base = (shop?.url ?? "").replace(/\/$/, "");
+  const text = fillMessage(cfg.messages.templates[type], { name: c.name.split(" ")[0], shop: shop?.n ?? "our shop", date: `${dd}/${mm}/${yy}`, balance: c.available, wallet: base ? `${base}/w/${c.walletToken}` : "", ...vars });
+  const to = waNumber(c);
+  const [m] = await tx
+    .insert(loyaltyMessages)
+    .values({ id: uid(), customerId: c.id, type, phone: to ?? "", text, status: to ? "pending" : "failed", error: to ? "" : "This customer's WhatsApp number isn't a valid 10-digit number.", billId, key, createdAt: now, openedAt: null, opens: 0 })
+    .returning();
+  return m;
+}
 
-/** Birthday / anniversary rewards, once per member per year, inside the configured window. */
-async function grantOccasions(tx: Tx, c: LoyaltyCustomer, cfg: LoyaltyConfig, now = Date.now()) {
-  if (!cfg.enabled || c.status !== "active") return 0;
-  let n = 0;
-  for (const [k, occ, date] of [
-    ["birthday", cfg.birthday, c.birthday],
-    ["anniversary", cfg.anniversary, c.anniversary],
-  ] as const) {
-    if (!occ.enabled || !date || !tierOk(occ.tiers, c.tier)) continue;
-    const year = occasionYear(date, occ.windowDays, now);
-    if (year === null) continue;
-    const label = k === "birthday" ? "Birthday" : "Anniversary";
-    if (occ.bonusPoints > 0 && (await post(tx, c, { type: "occasion", points: occ.bonusPoints, key: `${k}:${c.id}:${year}`, ref: `${k}-${year}`, description: `${label} bonus ${year}` }, cfg, now))) n++;
-    const v = autoVoucher(occ.reward);
-    if (v && (await issueVoucher(tx, c, { ...v, source: k, key: `${k}-reward:${c.id}:${year}`, validityDays: occ.validityDays, note: `${label} ${year}` }, now))) n++;
+/** Staff opened WhatsApp with this message. We can't know it was delivered, so it is recorded as "opened", never "sent". */
+export async function openMessage(tx: Tx, a: Args) {
+  const m = await first(tx.select().from(loyaltyMessages).where(eq(loyaltyMessages.id, str(a.id, 40))));
+  if (!m) throw new ApiError("Message not found.", 404);
+  if (m.status === "failed") throw new ApiError(m.error || "This message can't be sent — fix the number and retry it first.");
+  const [u] = await tx.update(loyaltyMessages).set({ status: "opened", openedAt: Date.now(), opens: sql`${loyaltyMessages.opens} + 1` }).where(eq(loyaltyMessages.id, m.id)).returning();
+  return u;
+}
+
+/** Re-checks a failed message against the customer's current number and consent, so it can be sent after the number is fixed. */
+export async function retryMessage(tx: Tx, a: Args) {
+  const m = await first(tx.select().from(loyaltyMessages).where(eq(loyaltyMessages.id, str(a.id, 40))));
+  if (!m) throw new ApiError("Message not found.", 404);
+  const c = await byId(tx, m.customerId);
+  if (!c) throw new ApiError("That customer no longer exists.", 404);
+  const to = waNumber(c);
+  if (!c.consent) throw new ApiError("This customer hasn't agreed to WhatsApp messages.");
+  if (!to) throw new ApiError("This customer's WhatsApp number isn't a valid 10-digit number — edit the customer first.");
+  const [u] = await tx.update(loyaltyMessages).set({ phone: to, status: "pending", error: "" }).where(eq(loyaltyMessages.id, m.id)).returning();
+  return u;
+}
+
+/* ================================ spending-milestone rewards ================================ */
+
+/** Gives the customer every spending-milestone reward they have now earned (once each time they cross another
+    multiple of the reward's amount), and removes unused ones that are no longer earned (a bill was voided). */
+export async function syncMilestones(tx: Tx, c: LoyaltyCustomer, cfg: LoyaltyConfig, now = Date.now(), skipBill?: string, billId: string | null = null) {
+  const rewards = await tx.select().from(loyaltyRewards).where(and(eq(loyaltyRewards.trigger, "milestone"), eq(loyaltyRewards.active, true)));
+  const issued: Voucher[] = [];
+  for (const rw of rewards) {
+    if (!rw.productId || !(rw.milestoneAmount > 0)) continue;
+    // spending counts from the day the reward was created (unless the owner chose to count every old bill)
+    const spent = await spendOf(tx, c.phone, skipBill, cfg.gifts.countOldBills ? 0 : rw.createdAt);
+    const earned = Math.floor((spent + 1e-9) / rw.milestoneAmount);
+    if (cfg.gifts.milestone && !rewardAvailable(rw, c.tier, now)) {
+      let have = rw.perCustomerLimit === null ? 0 : (await tx.select({ n: sql<number>`count(*)::int` }).from(loyaltyVouchers).where(and(eq(loyaltyVouchers.customerId, c.id), eq(loyaltyVouchers.rewardId, rw.id), inArray(loyaltyVouchers.status, ["issued", "used"]))))[0].n;
+      for (let n = 1; n <= earned; n++) {
+        if (rw.perCustomerLimit !== null && have >= rw.perCustomerLimit && !(await first(tx.select({ id: loyaltyVouchers.id }).from(loyaltyVouchers).where(eq(loyaltyVouchers.key, `msr:${rw.id}:${c.id}:${n}`))))) break;
+        const v = await issueVoucher(tx, c, { name: rw.name, kind: "free_item", value: 0, productId: rw.productId, giftQty: rw.giftQty, source: "milestone", key: `msr:${rw.id}:${c.id}:${n}`, validityDays: cfg.gifts.validityDays, rewardId: rw.id, note: `Spent ₹${round2(rw.milestoneAmount * n)} in total` }, now);
+        if (v) have++;
+        if (v) {
+          issued.push(v);
+          await queueMessage(tx, c, "milestone", { reward: rw.name, amount: `₹${round2(rw.milestoneAmount * n)}`, quantity: rw.giftQty }, `milestone:${v.id}`, billId, now);
+        }
+      }
+    }
+    // an unused reward whose spending was taken back (a voided bill) goes away; a used one stays
+    const mine = await tx.select().from(loyaltyVouchers).where(and(eq(loyaltyVouchers.customerId, c.id), eq(loyaltyVouchers.rewardId, rw.id), eq(loyaltyVouchers.source, "milestone"), eq(loyaltyVouchers.status, "issued")));
+    for (const v of mine) {
+      const n = Number(v.key?.split(":")[3] ?? 0);
+      if (n > earned) await tx.update(loyaltyVouchers).set({ status: "cancelled", key: null, note: "The spending that unlocked this reward was cancelled" }).where(eq(loyaltyVouchers.id, v.id));
+    }
   }
-  return n;
+  return issued;
+}
+
+/** Points-based gifts a customer has just become able to claim (their balance crossed the cost). */
+async function notifyUnlocked(tx: Tx, c: LoyaltyCustomer, before: number, cfg: LoyaltyConfig, billId: string | null, now: number) {
+  if (!cfg.gifts.points || c.available <= before) return;
+  const rewards = await tx.select().from(loyaltyRewards).where(and(eq(loyaltyRewards.trigger, "points"), eq(loyaltyRewards.active, true)));
+  for (const rw of rewards) {
+    if (rw.pointsCost > 0 && before < rw.pointsCost && c.available >= rw.pointsCost) await queueMessage(tx, c, "unlock", { reward: rw.name, points: rw.pointsCost, quantity: rw.giftQty }, `unlock:${c.id}:${rw.id}:${billId ?? c.available}`, billId, now);
+  }
 }
 
 /* ================================ billing ================================ */
@@ -403,6 +452,8 @@ export type LoyaltyPlan = {
   cfg: LoyaltyConfig;
   customer: LoyaltyCustomer;
   reward: { voucher: Voucher } | { reward: Reward } | null;
+  /** the free gift the chosen reward entitles the customer to (a ₹0 line must be on the bill) */
+  gift: Entitlement | null;
   rewardDiscount: number;
   rewardName: string | null;
   points: number;
@@ -418,35 +469,39 @@ export async function planBill(tx: Tx, x: { phone: string; items: OrderItem[]; s
   if (!wantPoints && !rewardId && !voucherRef) return null;
   const cfg = await getConfig(tx);
   if (!cfg.enabled) throw new ApiError("The loyalty programme is switched off.");
-  if (!x.phone) throw new ApiError("Enter the member's mobile number to use points or rewards.");
+  if (!x.phone) throw new ApiError("Enter the customer's mobile number to use points or rewards.");
   const c = await byPhone(tx, x.phone);
-  if (!c) throw new ApiError("This mobile isn't a loyalty member yet.");
-  if (c.status !== "active") throw new ApiError("This member's loyalty account is deactivated.");
+  if (!c) throw new ApiError("This mobile isn't a loyalty customer yet.");
+  if (c.status !== "active") throw new ApiError("This customer's loyalty account is deactivated.");
   await expireFor(tx, c, cfg);
   const catOf = await catMap(tx);
+  const paid = x.items.filter((i) => !i.free);
 
   let reward: LoyaltyPlan["reward"] = null;
+  let gift: Entitlement | null = null;
   let rewardDiscount = 0;
   let rewardName: string | null = null;
   let spend = 0;
   if (voucherRef) {
     const v = await first(tx.select().from(loyaltyVouchers).where(eq(loyaltyVouchers.ref, voucherRef)));
-    if (!v || v.customerId !== c.id) throw new ApiError(`Reward ${voucherRef} isn't this member's.`);
+    if (!v || v.customerId !== c.id) throw new ApiError(`Reward ${voucherRef} isn't this customer's.`);
     if (!voucherLive(v)) throw new ApiError(`Reward ${voucherRef} is ${v.status === "issued" ? "expired" : v.status}.`);
     const r = rewardValue(v, x.items, x.afterManual);
     if (r.reason) throw new ApiError(r.reason + ".");
     reward = { voucher: v };
     rewardDiscount = r.amount;
     rewardName = v.name;
+    if (v.kind === "free_item" && v.productId) gift = { key: `voucher:${v.ref}`, source: "voucher", name: v.name, productId: v.productId, qty: Math.max(1, v.giftQty) };
   } else if (rewardId) {
     const rw = await first(tx.select().from(loyaltyRewards).where(eq(loyaltyRewards.id, rewardId)));
-    if (!rw) throw new ApiError("That reward no longer exists.");
+    if (!rw || rw.trigger !== "points") throw new ApiError("That reward no longer exists.");
+    if (!cfg.gifts.points) throw new ApiError("Points-based free gifts are switched off.");
     const why = rewardAvailable(rw, c.tier);
     if (why) throw new ApiError(`${rw.name}: ${why}.`);
     if (rw.pointsCost > c.available) throw new ApiError(`${rw.name} needs ${rw.pointsCost} points — ${c.available} available.`);
     if (rw.perCustomerLimit !== null) {
       const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(loyaltyVouchers).where(and(eq(loyaltyVouchers.customerId, c.id), eq(loyaltyVouchers.rewardId, rw.id), inArray(loyaltyVouchers.status, ["issued", "used"])));
-      if (n >= rw.perCustomerLimit) throw new ApiError(`${rw.name}: this member has used it the maximum ${rw.perCustomerLimit} time(s).`);
+      if (n >= rw.perCustomerLimit) throw new ApiError(`${rw.name}: this customer has already had it the maximum ${rw.perCustomerLimit} time(s).`);
     }
     const r = rewardValue(rw, x.items, x.afterManual);
     if (r.reason) throw new ApiError(r.reason + ".");
@@ -454,17 +509,56 @@ export async function planBill(tx: Tx, x: { phone: string; items: OrderItem[]; s
     rewardDiscount = r.amount;
     rewardName = rw.name;
     spend = rw.pointsCost;
+    if (rw.productId) gift = { key: `reward:${rw.id}`, source: "reward", name: rw.name, productId: rw.productId, qty: Math.max(1, rw.giftQty) };
   }
 
   let pointsDiscount = 0;
   if (wantPoints) {
-    const cap = redeemCap({ cfg, items: x.items, catOf, subtotal: x.subtotal, remaining: x.afterManual - rewardDiscount, available: c.available - spend, couponApplied: x.couponApplied, manualApplied: x.manualApplied, rewardApplied: !!reward });
+    const cap = redeemCap({ cfg, items: paid, catOf, subtotal: x.subtotal, remaining: x.afterManual - rewardDiscount, available: c.available - spend, couponApplied: x.couponApplied, manualApplied: x.manualApplied, rewardApplied: !!reward });
     if (cap.reason) throw new ApiError(cap.reason + ".");
-    if (wantPoints < cfg.redeem.minPoints) throw new ApiError(`Redeem at least ${cfg.redeem.minPoints} points at a time.`);
+    if (wantPoints < cap.minPoints) throw new ApiError(`Redeem at least ${cap.minPoints} points on a bill this size.`);
     if (wantPoints > cap.maxPoints) throw new ApiError(`At most ${cap.maxPoints} points can be used on this bill.`);
     pointsDiscount = pointsValue(wantPoints, cfg);
+    if (pointsDiscount > x.afterManual - rewardDiscount + 0.001) throw new ApiError("The points discount can't be more than the bill.");
   }
-  return { cfg, customer: c, reward, rewardDiscount, rewardName, points: wantPoints, pointsDiscount };
+  return { cfg, customer: c, reward, gift, rewardDiscount, rewardName, points: wantPoints, pointsDiscount };
+}
+
+/** Which free gifts this bill may carry: the shop's bill offers (for anyone) plus the reward the member chose.
+    Throws if a ₹0 line isn't backed by one of them or the gift is out of stock; otherwise returns the lines with
+    what each came from filled in. Nothing the browser says about a gift is trusted. */
+export async function checkGifts(tx: Tx, items: OrderItem[], afterManual: number, plan: LoyaltyPlan | null, phone: string, now = Date.now()): Promise<{ items: OrderItem[]; entitlements: Entitlement[]; offerUse: { id: string; times: number }[] }> {
+  if (!items.some((i) => i.free)) return { items, entitlements: [], offerUse: [] };
+  const cfg = plan?.cfg ?? (await getConfig(tx));
+  const offers = cfg.enabled && cfg.gifts.offers ? ((await tx.select().from(giftOffers).where(eq(giftOffers.active, true))) as GiftOffer[]) : [];
+  const member = !!plan || (await isMember(tx, phone));
+  const offerEnts = offerEntitlements(offers, items, afterManual, now, member);
+  const entitlements = [...offerEnts, ...(plan?.gift ? [plan.gift] : [])];
+  const prods = await tx.select({ id: products.id, name: products.name, stock: products.stock }).from(products);
+  const byId = new Map(prods.map((p) => [p.id, p]));
+  const problems = giftProblems(items, entitlements, (pid) => byId.get(pid)?.name ?? "That item");
+  if (problems.length) throw new ApiError(problems[0]);
+  const used = new Map<string, number>();
+  for (const it of items) if (it.free && it.productId) used.set(it.productId, (used.get(it.productId) ?? 0) + it.qty);
+  for (const [pid, q] of used) {
+    const p = byId.get(pid);
+    if (p && p.stock !== null && p.stock < q) throw new ApiError(`${p.name} is out of stock, so it can't be given as a free gift.`);
+  }
+  // how many times each offer was really used (so an offer with a total limit runs out)
+  const left = new Map(used);
+  const offerUse: { id: string; times: number }[] = [];
+  for (const e of offerEnts) {
+    const take = Math.min(e.qty, left.get(e.productId) ?? 0);
+    if (take <= 0) continue;
+    left.set(e.productId, (left.get(e.productId) ?? 0) - take);
+    const o = offers.find((x) => `offer:${x.id}` === e.key);
+    if (o) offerUse.push({ id: o.id, times: Math.ceil(take / Math.max(1, o.giftQty)) });
+  }
+  return {
+    entitlements,
+    offerUse,
+    items: items.map((it) => (it.free ? { ...it, price: 0, gift: entitlements.filter((e) => e.productId === it.productId).map((e) => e.name).join(", ").slice(0, 120) } : it)),
+  };
 }
 
 /** Is this mobile an active loyalty member? Decides which audience of coupons it can use. */
@@ -482,8 +576,8 @@ export async function memberFor(tx: Tx, phone: string) {
   return c && c.status === "active" ? c : null;
 }
 
-/** After the bill is written (same transaction): spend what was planned, then earn,
-    stamp, settle any referral and hand out occasion rewards. Returns points earned. */
+/** After the bill is written (same transaction): spend what was planned, then earn, hand out any spending-milestone
+    reward the bill unlocked, and record the WhatsApp messages. Returns points earned. */
 export async function afterBill(tx: Tx, bill: Bill, plan: LoyaltyPlan | null, actor: string): Promise<{ earned: number; customerId: string | null }> {
   const cfg = plan?.cfg ?? (await getConfig(tx));
   if (!cfg.enabled) return { earned: 0, customerId: null };
@@ -492,11 +586,12 @@ export async function afterBill(tx: Tx, bill: Bill, plan: LoyaltyPlan | null, ac
   const now = bill.createdAt;
   if (!plan) await expireFor(tx, c, cfg, now);
   const ctx = { billId: bill.id, invoiceNo: bill.invoiceNo, actor };
+  const prev = c.available;
 
   // ---- spend ----
   if (plan?.reward && "reward" in plan.reward) {
     const rw = plan.reward.reward;
-    const v = await issueVoucher(tx, c, { name: rw.name, kind: rw.kind, value: rw.value, productId: rw.productId, source: "points", key: `reward:${bill.id}`, validityDays: 0, rewardId: rw.id, pointsCost: rw.pointsCost, status: "used", billId: bill.id, invoiceNo: bill.invoiceNo }, now);
+    const v = await issueVoucher(tx, c, { name: rw.name, kind: rw.kind, value: rw.value, productId: rw.productId, giftQty: rw.giftQty, source: "points", key: `reward:${bill.id}`, validityDays: 0, rewardId: rw.id, pointsCost: rw.pointsCost, status: "used", billId: bill.id, invoiceNo: bill.invoiceNo }, now);
     if (v) {
       if (rw.pointsCost > 0) await post(tx, c, { type: "reward", points: -rw.pointsCost, ...ctx, ref: v.ref, key: `reward-pts:${bill.id}`, description: `Redeemed reward: ${rw.name}` }, cfg, now);
       await tx.update(loyaltyRewards).set({ redeemed: sql`${loyaltyRewards.redeemed} + 1` }).where(eq(loyaltyRewards.id, rw.id));
@@ -504,80 +599,31 @@ export async function afterBill(tx: Tx, bill: Bill, plan: LoyaltyPlan | null, ac
     }
   } else if (plan?.reward && "voucher" in plan.reward) {
     await tx.update(loyaltyVouchers).set({ status: "used", usedAt: now, billId: bill.id, invoiceNo: bill.invoiceNo }).where(eq(loyaltyVouchers.id, plan.reward.voucher.id));
+    if (plan.reward.voucher.rewardId) await tx.update(loyaltyRewards).set({ redeemed: sql`${loyaltyRewards.redeemed} + 1` }).where(eq(loyaltyRewards.id, plan.reward.voucher.rewardId));
   }
   if (plan?.points) await post(tx, c, { type: "redemption", points: -plan.points, ...ctx, key: `redeem:${bill.id}`, description: `Redeemed ${plan.points} pts for ₹${plan.pointsDiscount} off` }, cfg, now);
 
-  // ---- earn ----
+  // ---- earn: once per bill (the key is unique), on what was paid for eligible items, never on free gifts ----
   const catOf = await catMap(tx);
-  const stats = await statsForPhone(tx, c.phone, cfg);
-  const seg = segmentOf(stats, cfg, c.tier, now);
-  const firstPurchase = !(await first(tx.select({ id: loyaltyLedger.id }).from(loyaltyLedger).where(and(eq(loyaltyLedger.customerId, c.id), eq(loyaltyLedger.type, "purchase")))));
-  const elig = eligibleSubtotal(bill.items, catOf, cfg.earn.excludedProductIds, cfg.earn.excludedCategories);
-  const ratio = bill.subtotal > 0 ? Math.max(0, bill.subtotal - bill.discount) / bill.subtotal : 0;
-  const all = (await tx.select().from(loyaltyCampaigns).where(eq(loyaltyCampaigns.active, true))) as Campaign[];
-  const camps: Campaign[] = [];
-  for (const k of all) {
-    if (!campaignApplies(k, { now, tier: c.tier, segment: seg, eligibleNet: round2(elig * ratio), items: bill.items, catOf })) continue;
-    if (k.perCustomerLimit !== null) {
-      const [{ n }] = await tx.select({ n: sql<number>`count(distinct ${loyaltyLedger.billId})::int` }).from(loyaltyLedger).where(and(eq(loyaltyLedger.customerId, c.id), eq(loyaltyLedger.ref, `camp:${k.id}`)));
-      if (n >= k.perCustomerLimit) continue;
-    }
-    camps.push(k);
-  }
-  const earn = earnFor({ cfg, items: bill.items, catOf, pointsOf: await pointsMap(tx), subtotal: bill.subtotal, discount: bill.discount, tier: c.tier, firstPurchase, campaigns: camps });
+  const earn = earnFor({ cfg, items: bill.items, catOf, pointsOf: await pointsMap(tx), subtotal: bill.subtotal, discount: bill.discount, tier: c.tier, firstPurchase: false, campaigns: [] });
   let earned = 0;
-  const usedCamps = new Map<string, number>();
   for (const p of earn.parts) {
-    const key = p.type === "bonus" ? `first:${c.id}` : `earn:${bill.id}:${p.type}:${p.campaignId ?? ""}`;
-    const e = await post(tx, c, { type: p.type, points: p.points, ...ctx, ref: p.campaignId ? `camp:${p.campaignId}` : "", key, description: p.label }, cfg, now);
-    if (e) {
-      earned += e.points;
-      if (p.campaignId) usedCamps.set(p.campaignId, (usedCamps.get(p.campaignId) ?? 0) + e.points);
-    }
-  }
-  for (const [id, pts] of usedCamps) await tx.update(loyaltyCampaigns).set({ used: sql`${loyaltyCampaigns.used} + 1`, pointsGiven: sql`${loyaltyCampaigns.pointsGiven} + ${pts}` }).where(eq(loyaltyCampaigns.id, id));
-
-  // ---- stamp ----
-  const st = cfg.stamps;
-  if (st.enabled && bill.total >= st.minBill && tierOk(st.tiers, c.tier)) {
-    const visitKey = st.rule === "per_bill" ? `bill:${bill.id}` : `${c.id}:${bill.sessionId ? `tab:${bill.sessionId}` : shopDate(now)}`;
-    const dayKey = `${c.id}:${shopDate(now)}`;
-    // a tab and a counter bill on the same day are still one visit
-    const dupe = await first(tx.select({ id: loyaltyStamps.id }).from(loyaltyStamps).where(and(eq(loyaltyStamps.status, "active"), st.rule === "per_bill" ? eq(loyaltyStamps.visitKey, visitKey) : or(eq(loyaltyStamps.visitKey, visitKey), eq(loyaltyStamps.visitKey, dayKey))!)));
-    if (!dupe) {
-      await tx.insert(loyaltyStamps).values({ id: uid(), customerId: c.id, billId: bill.id, visitKey: st.rule === "per_bill" ? visitKey : dayKey, status: "active", createdAt: now });
-      c.stamps += 1;
-      await tx.update(loyaltyCustomers).set({ stamps: c.stamps }).where(eq(loyaltyCustomers.id, c.id));
-      const size = st.milestones.length ? st.milestones[st.milestones.length - 1].visits : 0;
-      if (size) {
-        const pos = ((c.stamps - 1) % size) + 1;
-        const cycle = Math.floor((c.stamps - 1) / size);
-        const m = st.milestones.find((x) => x.visits === pos);
-        const v = m && autoVoucher(m.reward);
-        if (m && v) await issueVoucher(tx, c, { ...v, source: "milestone", key: `ms:${c.id}:${cycle}:${pos}`, validityDays: m.validityDays, note: `${pos}-visit reward`, billId: null }, now);
-      }
-    }
+    const e = await post(tx, c, { type: p.type, points: p.points, ...ctx, key: `earn:${bill.id}:${p.type}:`, description: p.label }, cfg, now);
+    if (e) earned += e.points;
   }
 
-  // ---- referral ----
-  const rf = cfg.referral;
-  const ref = await first(tx.select().from(loyaltyReferrals).where(and(eq(loyaltyReferrals.refereeId, c.id), eq(loyaltyReferrals.status, "pending"))));
-  const today = shopDate(now);
-  if (ref && rf.enabled && (!rf.startsOn || today >= rf.startsOn) && (!rf.endsOn || today <= rf.endsOn) && earn.eligibleNet >= rf.minPurchase) {
-    const referrer = await byId(tx, ref.referrerId);
-    const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(loyaltyReferrals).where(and(eq(loyaltyReferrals.referrerId, ref.referrerId), eq(loyaltyReferrals.status, "rewarded")));
-    if (!referrer || referrer.status !== "active" || !tierOk(rf.tiers, referrer.tier) || (rf.maxPerReferrer > 0 && n >= rf.maxPerReferrer)) {
-      await tx.update(loyaltyReferrals).set({ status: "rejected", billId: bill.id }).where(eq(loyaltyReferrals.id, ref.id));
-    } else {
-      const a = await post(tx, referrer, { type: "referral", points: rf.referrerBonus, ...ctx, ref: ref.id, key: `ref:${ref.id}:r`, description: `Referral reward — ${c.name} made their first purchase` }, cfg, now);
-      const b = await post(tx, c, { type: "referral", points: rf.refereeBonus, ...ctx, ref: ref.id, key: `ref:${ref.id}:n`, description: `Welcome reward — referred by ${referrer.name}` }, cfg, now);
-      if (b) earned += b.points;
-      await tx.update(loyaltyReferrals).set({ status: "rewarded", billId: bill.id, referrerPoints: a?.points ?? 0, refereePoints: b?.points ?? 0, rewardedAt: now }).where(eq(loyaltyReferrals.id, ref.id));
-    }
-  }
+  // ---- spending-milestone gifts this bill may have unlocked ----
+  await syncMilestones(tx, c, cfg, now, undefined, bill.id);
 
-  await grantOccasions(tx, c, cfg, now);
-  await tx.update(bills).set({ loyaltyCustomerId: c.id, pointsEarned: earned }).where(eq(bills.id, bill.id));
+  // ---- WhatsApp messages: only after everything above succeeded (it is the same transaction) ----
+  const bn = bill.invoiceNo;
+  if (earned > 0) await queueMessage(tx, c, "earned", { points: earned, bill: bn, amount: `₹${earn.eligibleNet}` }, `earned:${bill.id}`, bill.id, now);
+  if (plan?.points) await queueMessage(tx, c, "redeemed", { points: plan.points, discount: plan.pointsDiscount, bill: bn }, `redeemed:${bill.id}`, bill.id, now);
+  await notifyUnlocked(tx, c, prev, cfg, bill.id, now);
+  let k = 0;
+  for (const it of bill.items) if (it.free) await queueMessage(tx, c, "claimed", { reward: it.name, quantity: it.qty, bill: bn }, `claimed:${bill.id}:${k++}`, bill.id, now);
+
+  await tx.update(bills).set({ loyaltyCustomerId: c.id, pointsEarned: earned, loyaltyPrev: prev, loyaltyBalance: c.available }).where(eq(bills.id, bill.id));
   return { earned, customerId: c.id };
 }
 
@@ -590,6 +636,7 @@ export async function reverseBill(tx: Tx, bill: Pick<Bill, "id" | "invoiceNo" | 
   const cfg = await getConfig(tx);
   const now = Date.now();
   const ctx = { billId: bill.id, invoiceNo: bill.invoiceNo, actor };
+  const startAvail = c.available;
   const rows = await tx.select().from(loyaltyLedger).where(eq(loyaltyLedger.billId, bill.id));
   const mine = rows.filter((r) => r.customerId === c.id);
   const full = fraction >= 0.9999;
@@ -615,6 +662,7 @@ export async function reverseBill(tx: Tx, bill: Pick<Bill, "id" | "invoiceNo" | 
         if (v.rewardId) await tx.update(loyaltyRewards).set({ redeemed: sql`greatest(0, ${loyaltyRewards.redeemed} - 1)` }).where(eq(loyaltyRewards.id, v.rewardId));
       } else {
         await tx.update(loyaltyVouchers).set({ status: "issued", usedAt: null, billId: null, invoiceNo: null }).where(eq(loyaltyVouchers.id, v.id));
+        if (v.rewardId) await tx.update(loyaltyRewards).set({ redeemed: sql`greatest(0, ${loyaltyRewards.redeemed} - 1)` }).where(eq(loyaltyRewards.id, v.rewardId));
       }
     }
     // the visit stamp, and an unused milestone reward it unlocked
@@ -638,9 +686,11 @@ export async function reverseBill(tx: Tx, bill: Pick<Bill, "id" | "invoiceNo" | 
       if (referrer && ref.referrerPoints > 0) await post(tx, referrer, { type: "refund_reversal", points: -ref.referrerPoints, ...ctx, ref: ref.id, key: `rev:${ref.id}:r`, partial: true, description: `${reason}: referral reward taken back`, lifetime: -ref.referrerPoints }, cfg, now);
       await tx.update(loyaltyReferrals).set({ status: "reversed" }).where(eq(loyaltyReferrals.id, ref.id));
     }
-    // campaign use
-    for (const r of mine) if (r.ref.startsWith("camp:") && r.points > 0) await tx.update(loyaltyCampaigns).set({ used: sql`greatest(0, ${loyaltyCampaigns.used} - 1)`, pointsGiven: sql`greatest(0, ${loyaltyCampaigns.pointsGiven} - ${r.points})` }).where(eq(loyaltyCampaigns.id, r.ref.slice(5)));
   }
+  if (full) await syncMilestones(tx, c, cfg, now, bill.id);
+  // tell the customer when their points moved because a bill was cancelled or refunded
+  const moved = c.available - startAvail;
+  if (moved !== 0) await queueMessage(tx, c, "adjust", { points: `${moved > 0 ? "+" : ""}${moved}`, reason: `${reason} — bill ${bill.invoiceNo}` }, `rev-msg:${bill.id}:${uid(6)}`, bill.id, now);
   await audit(tx, actor, full ? "bill.reverse" : "bill.partial_refund", { customerId: c.id, ref: bill.invoiceNo, after: { fraction: round2(fraction), pointsTakenBack: take }, reason });
 }
 /** A bill is deleted for good: undo what it did to points, rewards, stamps and referrals (so balances are
@@ -685,6 +735,7 @@ export async function wipeBillTraces(tx: Tx, billId: string, invoiceNo: string |
     erased += ids.length;
   }
   await tx.delete(loyaltyStamps).where(and(eq(loyaltyStamps.billId, billId), eq(loyaltyStamps.status, "reversed")));
+  await tx.delete(loyaltyMessages).where(eq(loyaltyMessages.billId, billId));
   await tx.delete(loyaltyVouchers).where(and(eq(loyaltyVouchers.billId, billId), eq(loyaltyVouchers.status, "cancelled")));
   if (invoiceNo) {
     await tx.delete(loyaltyVouchers).where(and(eq(loyaltyVouchers.status, "cancelled"), like(loyaltyVouchers.note, `%(${invoiceNo})%`)));
@@ -721,32 +772,14 @@ export async function adjustPoints(tx: Tx, a: Args, actor: string) {
   await expireFor(tx, c, cfg);
   if (pts < 0 && -pts > c.available) throw new ApiError(`Only ${c.available} points available to remove.`);
   const before = c.available;
-  await post(tx, c, { type: "adjustment", points: pts, description: `Manual adjustment: ${reason}`, actor, key: `adj:${uid(8)}`, lifetime: 0 }, cfg);
+  const e = await post(tx, c, { type: "adjustment", points: pts, description: `Manual adjustment: ${reason}`, actor, key: `adj:${uid(8)}`, lifetime: 0 }, cfg);
   await audit(tx, actor, "points.adjust", { customerId: c.id, ref: c.code, before: { available: before }, after: { available: c.available, change: pts }, reason });
-  return c;
-}
-
-/** Redeem a catalogue reward now (outside billing) — points go immediately, staff use the reference later. */
-export async function issueReward(tx: Tx, a: Args, actor: string) {
-  const c = await mustCustomer(tx, str(a.id, 40));
-  if (c.status !== "active") throw new ApiError("This member's loyalty account is deactivated.");
-  const cfg = await getConfig(tx);
-  if (!cfg.enabled) throw new ApiError("The loyalty programme is switched off.");
-  await expireFor(tx, c, cfg);
-  const rw = await first(tx.select().from(loyaltyRewards).where(eq(loyaltyRewards.id, str(a.rewardId, 40))));
-  if (!rw) throw new ApiError("That reward no longer exists.");
-  const why = rewardAvailable(rw, c.tier);
-  if (why) throw new ApiError(`${rw.name}: ${why}.`);
-  if (rw.pointsCost > c.available) throw new ApiError(`${rw.name} needs ${rw.pointsCost} points — ${c.available} available.`);
-  if (rw.perCustomerLimit !== null) {
-    const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(loyaltyVouchers).where(and(eq(loyaltyVouchers.customerId, c.id), eq(loyaltyVouchers.rewardId, rw.id), inArray(loyaltyVouchers.status, ["issued", "used"])));
-    if (n >= rw.perCustomerLimit) throw new ApiError(`${rw.name}: limit of ${rw.perCustomerLimit} per customer reached.`);
+  let message: LoyaltyMessage | null = null;
+  if (e) {
+    message = await queueMessage(tx, c, "adjust", { points: `${pts > 0 ? "+" : ""}${pts}`, reason }, `adj-msg:${e.id}`, null);
+    await notifyUnlocked(tx, c, before, cfg, null, Date.now());
   }
-  const v = await issueVoucher(tx, c, { name: rw.name, kind: rw.kind, value: rw.value, productId: rw.productId, source: "points", key: `issue:${uid(10)}`, validityDays: 30, rewardId: rw.id, pointsCost: rw.pointsCost });
-  if (!v) throw new ApiError("Couldn't issue that reward — try again.");
-  if (rw.pointsCost > 0) await post(tx, c, { type: "reward", points: -rw.pointsCost, ref: v.ref, key: `issue-pts:${v.id}`, description: `Redeemed reward: ${rw.name} (${v.ref})`, actor }, cfg);
-  await tx.update(loyaltyRewards).set({ redeemed: sql`${loyaltyRewards.redeemed} + 1` }).where(eq(loyaltyRewards.id, rw.id));
-  return v;
+  return { ...c, message };
 }
 
 export async function cancelVoucher(tx: Tx, a: Args, actor: string) {
@@ -769,7 +802,7 @@ export async function partialRefund(tx: Tx, a: Args, actor: string) {
   const b = await first(tx.select().from(bills).where(eq(bills.id, str(a.billId, 40))));
   if (!b) throw new ApiError("Bill not found.", 404);
   if (b.status !== "completed") throw new ApiError("That bill is already void.");
-  if (!b.loyaltyCustomerId) throw new ApiError("That bill isn't linked to a loyalty member.");
+  if (!b.loyaltyCustomerId) throw new ApiError("That bill isn't linked to a loyalty customer.");
   const amount = round2(num(a.amount));
   if (!(amount > 0 && amount <= b.total)) throw new ApiError(`Refund amount should be between ₹1 and ₹${b.total}.`);
   const reason = str(a.reason, 300);
@@ -778,34 +811,11 @@ export async function partialRefund(tx: Tx, a: Args, actor: string) {
   return null;
 }
 
-/** Bonus points or a free reward for a set of members — targeted campaigns from the CRM tab. */
-export async function grant(tx: Tx, a: Args, actor: string) {
-  const ids = strs(a.customerIds, 5000);
-  if (!ids.length) throw new ApiError("Pick at least one customer.");
-  const reason = str(a.reason, 200);
-  if (!reason) throw new ApiError("Name the campaign — it shows on each customer's history.");
-  const pts = Math.max(0, Math.floor(num(a.points) || 0));
-  const kind = ["free_item", "percent", "amount"].includes(String(a.kind)) ? (a.kind as RewardKind) : null;
-  const value = num(a.value) || 0;
-  if (!pts && !kind) throw new ApiError("Give bonus points, a reward, or both.");
-  if (kind && !(value > 0) && kind !== "free_item") throw new ApiError("Enter the reward's value.");
-  const cfg = await getConfig(tx);
-  const gid = uid(8);
-  const members = await tx.select().from(loyaltyCustomers).where(and(inArray(loyaltyCustomers.id, ids), eq(loyaltyCustomers.status, "active")));
-  for (const c of members) {
-    if (pts) await post(tx, c, { type: "promo", points: pts, key: `grant:${gid}:${c.id}`, ref: `grant:${gid}`, description: reason, actor }, cfg);
-    if (kind) await issueVoucher(tx, c, { name: str(a.rewardName, 80) || reason, kind, value: kind === "percent" ? Math.min(100, value) : value, productId: str(a.productId, 40) || null, source: "campaign", key: `grant-v:${gid}:${c.id}`, validityDays: Math.max(1, Math.floor(num(a.validityDays) || 30)), note: reason });
-  }
-  await audit(tx, actor, "campaign.grant", { ref: gid, after: { customers: members.length, points: pts, reward: kind ? { kind, value } : null }, reason });
-  return { customers: members.length };
-}
-
-/** Housekeeping, run when the Loyalty page opens: expire due points and old rewards,
-    hand out birthday/anniversary rewards. */
+/** Housekeeping, run when the Loyalty page opens: tidy records of bills that were deleted, retire old rewards. */
 export async function maintain(tx: Tx) {
   const cfg = await getConfig(tx);
   const now = Date.now();
-  await purgeOrphans(tx);
+  if (cfg.display.autoTidy) await purgeOrphans(tx);
   const due = await tx.selectDistinct({ id: loyaltyLots.customerId }).from(loyaltyLots).where(and(gt(loyaltyLots.remaining, 0), isNotNull(loyaltyLots.expiresAt), lt(loyaltyLots.expiresAt, now)));
   let expired = 0;
   for (const { id } of due) {
@@ -813,41 +823,49 @@ export async function maintain(tx: Tx) {
     if (c) expired += await expireFor(tx, c, cfg, now);
   }
   const old = await tx.update(loyaltyVouchers).set({ status: "expired" }).where(and(eq(loyaltyVouchers.status, "issued"), isNotNull(loyaltyVouchers.expiresAt), lt(loyaltyVouchers.expiresAt, now))).returning({ id: loyaltyVouchers.id });
-  let occasions = 0;
-  if (cfg.enabled && (cfg.birthday.enabled || cfg.anniversary.enabled)) {
-    const withDates = await tx.select().from(loyaltyCustomers).where(and(eq(loyaltyCustomers.status, "active"), or(ne(loyaltyCustomers.birthday, ""), ne(loyaltyCustomers.anniversary, ""))!));
-    for (const c of withDates) occasions += await grantOccasions(tx, c, cfg, now);
-  }
-  return { expired, vouchersExpired: old.length, occasions };
+  return { expired, vouchersExpired: old.length };
 }
 
 export async function saveConfig(tx: Tx, a: Args, actor: string) {
   const before = await getConfig(tx);
   const cfg = sanitizeConfig(a.config);
+  if (!rangesValid(cfg.redeem.ranges)) throw new ApiError("Fix the points ranges first: each needs a minimum of at least 1 point, a maximum that is not below it, and an end that is not below its start.");
   await tx.insert(loyaltySettings).values({ id: 1, config: cfg, updatedAt: Date.now() }).onConflictDoUpdate({ target: loyaltySettings.id, set: { config: cfg, updatedAt: Date.now() } });
   await audit(tx, actor, "settings.update", { before, after: cfg, reason: str(a.reason, 300) });
   return cfg;
 }
 
+const intIn = (v: unknown, lo: number, hi: number, label: string) => {
+  const n = Math.floor(num(v));
+  if (!(n >= lo && n <= hi)) throw new ApiError(`${label} should be a whole number from ${lo} to ${hi}.`);
+  return n;
+};
+
+/** A free gift reward: unlocked by points, or by spending a set amount in total. The gift is always an existing menu item. */
 export async function saveReward(tx: Tx, a: Args, actor: string) {
   const name = str(a.name, 80);
   if (!name) throw new ApiError("Give the reward a name.");
-  const kind: RewardKind = a.kind === "free_item" || a.kind === "percent" ? a.kind : "amount";
-  const value = round2(num(a.value) || 0);
-  if (kind === "percent" && !(value > 0 && value <= 100)) throw new ApiError("A percentage reward should be between 1 and 100%.");
-  if (kind === "amount" && !(value > 0)) throw new ApiError("Enter the reward's rupee value.");
-  const productId = str(a.productId, 40) || null;
-  if (kind === "free_item" && !productId) throw new ApiError("Pick the free item.");
-  if (productId && !(await first(tx.select({ id: products.id }).from(products).where(eq(products.id, productId))))) throw new ApiError("That item is no longer on the menu.");
-  const pointsCost = Math.max(0, Math.floor(num(a.pointsCost) || 0));
+  const trigger = a.trigger === "milestone" ? "milestone" : "points";
+  const productId = str(a.productId, 40);
+  if (!productId) throw new ApiError("Pick the free gift from your menu.");
+  if (!(await first(tx.select({ id: products.id }).from(products).where(eq(products.id, productId))))) throw new ApiError("That item is no longer on the menu.");
+  const giftQty = intIn(a.giftQty ?? 1, 1, 99, "The gift quantity");
+  const pointsCost = trigger === "points" ? intIn(a.pointsCost, 1, 10_000_000, "The points needed") : 0;
+  const milestoneAmount = trigger === "milestone" ? round2(num(a.milestoneAmount)) : 0;
+  if (trigger === "milestone" && !(milestoneAmount > 0)) throw new ApiError("Enter the spending amount that unlocks this reward.");
   const startsOn = day(a.startsOn) || null;
   const endsOn = day(a.endsOn) || null;
   if (startsOn && endsOn && endsOn < startsOn) throw new ApiError("The end date is before the start date.");
-  const maxR = optInt(a.maxRedemptions);
-  const perC = optInt(a.perCustomerLimit);
-  if ((maxR !== null && !(maxR >= 1)) || (perC !== null && !(perC >= 1))) throw new ApiError("Limits should be at least 1 (or blank for none).");
+  const limit = (v: unknown, label: string) => {
+    if (v === null || v === undefined || str(String(v), 12) === "") return null;
+    const n = Math.floor(num(v));
+    if (!(n >= 1)) throw new ApiError(`${label} should be at least 1, or left blank for no limit.`);
+    return n;
+  };
+  const maxRedemptions = limit(a.maxRedemptions, "The total limit");
+  const perCustomerLimit = limit(a.perCustomerLimit, "The limit per customer");
   const now = Date.now();
-  const fields = { name, description: str(a.description, 300), imageUrl: /^https?:\/\//i.test(str(a.imageUrl, 500)) ? str(a.imageUrl, 500) : "", category: str(a.category, 40), kind, value: kind === "free_item" ? 0 : value, productId: kind === "free_item" ? productId : null, pointsCost, tiers: tiersOf(a.tiers), startsOn, endsOn, active: a.active !== false, maxRedemptions: maxR, perCustomerLimit: perC, terms: str(a.terms, 500), updatedAt: now };
+  const fields = { name, description: str(a.description, 300), imageUrl: "", category: "", kind: "free_item" as RewardKind, value: 0, productId, pointsCost, trigger: trigger as "points" | "milestone", milestoneAmount, giftQty, tiers: [] as string[], startsOn, endsOn, active: a.active !== false, maxRedemptions, perCustomerLimit, terms: "", updatedAt: now };
   const id = str(a.id, 40);
   if (id) {
     const before = await first(tx.select().from(loyaltyRewards).where(eq(loyaltyRewards.id, id)));
@@ -864,7 +882,7 @@ export async function saveReward(tx: Tx, a: Args, actor: string) {
 export async function deleteReward(tx: Tx, a: Args, actor: string) {
   const r = await first(tx.select().from(loyaltyRewards).where(eq(loyaltyRewards.id, str(a.id, 40))));
   if (!r) throw new ApiError("Reward not found.", 404);
-  // a reward that's been redeemed stays for the history; it's just switched off
+  // a reward that's been unlocked or claimed stays for the history; it's just switched off
   if (r.redeemed > 0 || (await first(tx.select({ id: loyaltyVouchers.id }).from(loyaltyVouchers).where(eq(loyaltyVouchers.rewardId, r.id))))) {
     await tx.update(loyaltyRewards).set({ active: false, updatedAt: Date.now() }).where(eq(loyaltyRewards.id, r.id));
     await audit(tx, actor, "reward.archive", { ref: r.name });
@@ -875,71 +893,59 @@ export async function deleteReward(tx: Tx, a: Args, actor: string) {
   return { archived: false };
 }
 
-const SEGS: Segment[] = ["new", "regular", "frequent", "high_value", "vip", "at_risk", "inactive", "lost"];
-
-export async function saveCampaign(tx: Tx, a: Args, actor: string) {
+/** A free-gift offer on the bill itself. */
+export async function saveOffer(tx: Tx, a: Args, actor: string) {
   const name = str(a.name, 80);
-  if (!name) throw new ApiError("Give the campaign a name.");
-  const type = a.type === "bonus" ? "bonus" : "multiplier";
-  const value = round2(num(a.value));
-  if (type === "multiplier" && !(value > 1 && value <= 10)) throw new ApiError("A points multiplier should be more than 1 (e.g. 2 for double points) and at most 10.");
-  if (type === "bonus" && !(value >= 1 && value <= 100000)) throw new ApiError("Enter the bonus points.");
-  const startsOn = day(a.startsOn);
-  const endsOn = day(a.endsOn);
+  if (!name) throw new ApiError("Give the offer a name.");
+  const type = a.type === "buy" ? "buy" : "spend";
+  const prod = async (v: unknown, label: string) => {
+    const id = str(v, 40);
+    if (!id) throw new ApiError(`Pick ${label}.`);
+    if (!(await first(tx.select({ id: products.id }).from(products).where(eq(products.id, id))))) throw new ApiError("That item is no longer on the menu.");
+    return id;
+  };
+  const giftProductId = await prod(a.giftProductId, "the free gift");
+  const giftQty = intIn(a.giftQty ?? 1, 1, 99, "The gift quantity");
+  let minBill = 0;
+  let productId: string | null = null;
+  let buyQty = 1;
+  if (type === "spend") {
+    minBill = round2(num(a.minBill));
+    if (!(minBill > 0)) throw new ApiError("Enter the bill amount that earns the gift.");
+    if (str(a.productId, 40)) {
+      productId = await prod(a.productId, "the qualifying item");
+      buyQty = intIn(a.buyQty ?? 1, 1, 999, "The quantity to buy");
+    }
+  } else {
+    productId = await prod(a.productId, "the item the customer buys");
+    buyQty = intIn(a.buyQty, 1, 999, "The quantity to buy");
+  }
+  const startsOn = day(a.startsOn) || null;
+  const endsOn = day(a.endsOn) || null;
   if (startsOn && endsOn && endsOn < startsOn) throw new ApiError("The end date is before the start date.");
-  const hm = (v: unknown) => {
-    const x = str(v, 5);
-    if (x && !/^([01]\d|2[0-3]):[0-5]\d$/.test(x)) throw new ApiError("Times should be HH:MM.");
-    return x;
-  };
-  const usageLimit = optInt(a.usageLimit);
-  const perCustomerLimit = optInt(a.perCustomerLimit);
-  if ((usageLimit !== null && !(usageLimit >= 1)) || (perCustomerLimit !== null && !(perCustomerLimit >= 1))) throw new ApiError("Limits should be at least 1 (or blank for none).");
+  const maxTotal = a.maxTotal === null || a.maxTotal === undefined || str(String(a.maxTotal), 12) === "" ? null : Math.floor(num(a.maxTotal));
+  if (maxTotal !== null && !(maxTotal >= 1)) throw new ApiError("The total limit should be at least 1, or left blank for no limit.");
   const now = Date.now();
-  const fields = {
-    name,
-    description: str(a.description, 300),
-    type: type as "bonus" | "multiplier",
-    value,
-    startsOn,
-    endsOn,
-    startTime: hm(a.startTime),
-    endTime: hm(a.endTime),
-    days: Array.isArray(a.days) ? [...new Set((a.days as unknown[]).map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))] : [],
-    minPurchase: Math.max(0, round2(num(a.minPurchase) || 0)),
-    tiers: tiersOf(a.tiers),
-    segments: strs(a.segments).filter((x): x is Segment => (SEGS as string[]).includes(x)),
-    categories: strs(a.categories),
-    productIds: strs(a.productIds),
-    usageLimit,
-    perCustomerLimit,
-    active: a.active !== false,
-    updatedAt: now,
-  };
+  const fields = { name, type: type as "spend" | "buy", minBill, productId, buyQty, giftProductId, giftQty, repeatable: a.repeatable === true, audience: (a.audience === "members" ? "members" : "all") as "all" | "members", maxTotal, startsOn, endsOn, active: a.active !== false, updatedAt: now };
   const id = str(a.id, 40);
   if (id) {
-    const before = await first(tx.select().from(loyaltyCampaigns).where(eq(loyaltyCampaigns.id, id)));
-    if (!before) throw new ApiError("Campaign not found.", 404);
-    const [r] = await tx.update(loyaltyCampaigns).set(fields).where(eq(loyaltyCampaigns.id, id)).returning();
-    await audit(tx, actor, "campaign.update", { ref: r.name, before, after: r });
+    const before = await first(tx.select().from(giftOffers).where(eq(giftOffers.id, id)));
+    if (!before) throw new ApiError("Offer not found.", 404);
+    const [r] = await tx.update(giftOffers).set(fields).where(eq(giftOffers.id, id)).returning();
+    await audit(tx, actor, "offer.update", { ref: r.name, before, after: r });
     return r;
   }
-  const [r] = await tx.insert(loyaltyCampaigns).values({ id: uid(), ...fields, used: 0, pointsGiven: 0, createdAt: now }).returning();
-  await audit(tx, actor, "campaign.create", { ref: r.name, after: r });
+  const [r] = await tx.insert(giftOffers).values({ id: uid(), ...fields, given: 0, createdAt: now }).returning();
+  await audit(tx, actor, "offer.create", { ref: r.name, after: r });
   return r;
 }
 
-export async function deleteCampaign(tx: Tx, a: Args, actor: string) {
-  const r = await first(tx.select().from(loyaltyCampaigns).where(eq(loyaltyCampaigns.id, str(a.id, 40))));
-  if (!r) throw new ApiError("Campaign not found.", 404);
-  if (r.used > 0) {
-    await tx.update(loyaltyCampaigns).set({ active: false, updatedAt: Date.now() }).where(eq(loyaltyCampaigns.id, r.id));
-    await audit(tx, actor, "campaign.archive", { ref: r.name });
-    return { archived: true };
-  }
-  await tx.delete(loyaltyCampaigns).where(eq(loyaltyCampaigns.id, r.id));
-  await audit(tx, actor, "campaign.delete", { ref: r.name, before: r });
-  return { archived: false };
+export async function deleteOffer(tx: Tx, a: Args, actor: string) {
+  const r = await first(tx.select().from(giftOffers).where(eq(giftOffers.id, str(a.id, 40))));
+  if (!r) throw new ApiError("Offer not found.", 404);
+  await tx.delete(giftOffers).where(eq(giftOffers.id, r.id));
+  await audit(tx, actor, "offer.delete", { ref: r.name, before: r });
+  return null;
 }
 
 /** One row per member whose cached balance disagrees with the ledger or the point lots. */
@@ -956,97 +962,83 @@ async function mismatches(q: Q): Promise<string[]> {
 
 export async function loyaltyState(): Promise<LoyaltyState> {
   const q = db;
-  const now = Date.now();
   const cfg = await getConfig(q);
-  const [customers, rewards, vouchers, campaigns, referrals, auditRows, monthRows, regRows, totalRows, billRows, mism, soon] = await Promise.all([
+  const [customers, rewards, offers, vouchers, auditRows, messages, totalRows, giftRows, spendRows, mism, soon] = await Promise.all([
     q.select().from(loyaltyCustomers).orderBy(desc(loyaltyCustomers.createdAt)),
     q.select().from(loyaltyRewards).orderBy(desc(loyaltyRewards.createdAt)),
-    q.select().from(loyaltyVouchers).orderBy(desc(loyaltyVouchers.issuedAt)).limit(2000),
-    q.select().from(loyaltyCampaigns).orderBy(desc(loyaltyCampaigns.createdAt)),
-    q.select().from(loyaltyReferrals).orderBy(desc(loyaltyReferrals.createdAt)),
+    q.select().from(giftOffers).orderBy(desc(giftOffers.createdAt)),
+    q.select().from(loyaltyVouchers).orderBy(desc(loyaltyVouchers.issuedAt)).limit(3000),
     q.select().from(loyaltyAudit).orderBy(desc(loyaltyAudit.createdAt)).limit(300),
-    q.execute(sql`
-      select to_char(to_timestamp(created_at / 1000) at time zone 'Asia/Kolkata', 'YYYY-MM') m,
-        coalesce(sum(points) filter (where type in ('purchase','bonus','promo','referral','occasion')), 0)::int earned,
-        coalesce(-sum(points) filter (where type in ('redemption','reward')), 0)::int redeemed,
-        coalesce(-sum(points) filter (where type = 'expiry'), 0)::int expired
-      from ${loyaltyLedger} group by 1 order by 1`),
-    q.execute(sql`select to_char(to_timestamp(created_at / 1000) at time zone 'Asia/Kolkata', 'YYYY-MM') m, count(*)::int n from ${loyaltyCustomers} group by 1`),
+    q.select().from(loyaltyMessages).orderBy(desc(loyaltyMessages.createdAt)).limit(1500),
     q.execute(sql`
       select
         coalesce(sum(points) filter (where type in ('purchase','bonus','promo','referral','occasion')), 0)::int earned,
-        coalesce(-sum(points) filter (where type in ('redemption','reward')), 0)::int redeemed,
-        coalesce(-sum(points) filter (where type = 'expiry'), 0)::int expired,
-        coalesce(sum(points) filter (where type not in ('purchase','bonus','promo','referral','occasion','redemption','reward','expiry')), 0)::int adjusted
+        coalesce(-sum(points) filter (where type in ('redemption','reward')), 0)::int redeemed
       from ${loyaltyLedger}`),
-    q.execute(sql`select coalesce(sum(points_discount), 0)::float d, coalesce(sum(reward_discount), 0)::float r from ${bills} where status = 'completed'`),
+    q.execute(sql`select coalesce(sum((i->>'qty')::int), 0)::int n from ${bills} b, jsonb_array_elements(b.items) i where b.status = 'completed' and (i->>'free') = 'true'`),
+    q.select({ phone: bills.customerPhone, subtotal: bills.subtotal, discount: bills.discount, createdAt: bills.createdAt }).from(bills).where(eq(bills.status, "completed")),
     mismatches(q),
     q
       .select({ customerId: loyaltyLots.customerId, points: sql<number>`sum(${loyaltyLots.remaining})::int`, expiresAt: sql<number>`min(${loyaltyLots.expiresAt})` })
       .from(loyaltyLots)
-      .where(and(gt(loyaltyLots.remaining, 0), isNotNull(loyaltyLots.expiresAt), gte(loyaltyLots.expiresAt, now), lte(loyaltyLots.expiresAt, now + cfg.expiry.warnDays * DAY)))
+      .where(and(gt(loyaltyLots.remaining, 0), isNotNull(loyaltyLots.expiresAt), gte(loyaltyLots.expiresAt, Date.now()), lte(loyaltyLots.expiresAt, Date.now() + cfg.expiry.warnDays * DAY)))
       .groupBy(loyaltyLots.customerId),
   ]);
-  const regs = new Map((regRows.rows as { m: string; n: number }[]).map((r) => [r.m, r.n]));
-  const months = (monthRows.rows as { m: string; earned: number; redeemed: number; expired: number }[]).map((r) => ({ month: r.m, earned: r.earned, redeemed: r.redeemed, expired: r.expired, registrations: regs.get(r.m) ?? 0 }));
-  for (const [m, n] of regs) if (!months.some((x) => x.month === m)) months.push({ month: m, earned: 0, redeemed: 0, expired: 0, registrations: n });
-  months.sort((a, b) => a.month.localeCompare(b.month));
-  const t = (totalRows.rows[0] ?? { earned: 0, redeemed: 0, expired: 0, adjusted: 0 }) as { earned: number; redeemed: number; expired: number; adjusted: number };
-  const bd = (billRows.rows[0] ?? { d: 0, r: 0 }) as { d: number; r: number };
+  const byPhoneId = new Map(customers.map((c) => [c.phone, c.id]));
+  const spend: Record<string, number> = {};
+  for (const b of spendRows) {
+    const id = byPhoneId.get(b.phone);
+    if (id) spend[id] = round2((spend[id] ?? 0) + Math.max(0, b.subtotal - b.discount));
+  }
+  // spending that counts towards each spending-milestone reward (from the day the reward was created)
+  const rewardSpend: Record<string, Record<string, number>> = {};
+  for (const rw of rewards.filter((r) => r.trigger === "milestone")) {
+    for (const b of spendRows) {
+      const id = byPhoneId.get(b.phone);
+      if (!id || (!cfg.gifts.countOldBills && b.createdAt < rw.createdAt)) continue;
+      (rewardSpend[id] ??= {})[rw.id] = round2(((rewardSpend[id] ?? {})[rw.id] ?? 0) + Math.max(0, b.subtotal - b.discount));
+    }
+  }
+  const t = (totalRows.rows[0] ?? { earned: 0, redeemed: 0 }) as { earned: number; redeemed: number };
   return {
     config: cfg,
     customers,
     rewards,
+    offers: offers as GiftOffer[],
     vouchers,
-    campaigns: campaigns as Campaign[],
-    referrals,
     audit: auditRows,
-    months,
-    totals: {
-      earned: t.earned,
-      redeemed: t.redeemed,
-      expired: t.expired,
-      adjusted: t.adjusted,
-      discounts: round2(bd.d),
-      rewardDiscounts: round2(bd.r),
-      rewardRedemptions: vouchers.filter((v) => v.status === "used").length,
-      outstanding: customers.reduce((a, c) => a + c.available, 0),
-      debt: customers.reduce((a, c) => a + c.debt, 0),
-    },
+    messages,
+    spend,
+    rewardSpend,
+    totals: { earned: t.earned, redeemed: t.redeemed, outstanding: customers.reduce((a, c) => a + c.available, 0), giftsGiven: Number((giftRows.rows[0] as { n: number } | undefined)?.n ?? 0) },
     mismatched: mism,
-    expiringSoon: soon.map((r) => ({ customerId: r.customerId, points: Number(r.points), expiresAt: Number(r.expiresAt) })),
+    expiring: Object.fromEntries(soon.map((r) => [r.customerId, { points: Number(r.points), expiresAt: Number(r.expiresAt) }])),
   };
 }
 
-/** Billing's view of one mobile. Read-only: points due to expire are already left out. */
+/** Billing's view of one mobile. Read-only. Also carries the bill offers, which work for people who aren't customers. */
 export async function lookup(phoneRaw: unknown): Promise<LoyaltyLookup> {
   const q = db;
   const cfg = await getConfig(q);
   const phone = mobile(phoneRaw);
-  const blank: PurchaseStats = { orders: 0, visits: 0, spent: 0, aov: 0, first: null, last: null, recentVisits: 0 };
-  if (!phone) return { enabled: cfg.enabled, config: cfg, customer: null, knownName: "", stats: blank, vouchers: [], rewards: [], campaigns: [], firstPurchase: true };
+  const offers = (await q.select().from(giftOffers).where(eq(giftOffers.active, true))) as GiftOffer[];
+  const blank = { enabled: cfg.enabled, config: cfg, customer: null, knownName: "", vouchers: [] as Voucher[], rewards: [] as Reward[], offers, firstPurchase: true };
+  if (!phone) return blank;
   const now = Date.now();
-  const [c, history, rewards, camps] = await Promise.all([byPhone(q, phone), billsOf(q, phone), q.select().from(loyaltyRewards).where(eq(loyaltyRewards.active, true)), q.select().from(loyaltyCampaigns).where(eq(loyaltyCampaigns.active, true))]);
-  const stats = statsFrom(history, cfg.crm.frequentDays, now);
+  const [c, history, rewards] = await Promise.all([byPhone(q, phone), billsOf(q, phone), q.select().from(loyaltyRewards).where(and(eq(loyaltyRewards.active, true), eq(loyaltyRewards.trigger, "points")))]);
   const knownName = history.find((b) => b.customerName && b.customerName !== "Walk-in customer")?.customerName ?? "";
-  if (!c) return { enabled: cfg.enabled, config: cfg, customer: null, knownName, stats, vouchers: [], rewards: [], campaigns: camps as Campaign[], firstPurchase: true };
-  const [lapsed] = await q.select({ n: sql<number>`coalesce(sum(${loyaltyLots.remaining}), 0)::int` }).from(loyaltyLots).where(and(eq(loyaltyLots.customerId, c.id), gt(loyaltyLots.remaining, 0), isNotNull(loyaltyLots.expiresAt), lt(loyaltyLots.expiresAt, now)));
+  if (!c) return { ...blank, knownName };
   const vouchers = (await q.select().from(loyaltyVouchers).where(and(eq(loyaltyVouchers.customerId, c.id), eq(loyaltyVouchers.status, "issued")))).filter((v) => voucherLive(v, now));
-  const counts = await q.select({ id: loyaltyVouchers.rewardId, n: sql<number>`count(*)::int` }).from(loyaltyVouchers).where(and(eq(loyaltyVouchers.customerId, c.id), inArray(loyaltyVouchers.status, ["issued", "used"]))).groupBy(loyaltyVouchers.rewardId);
-  const used = new Map(counts.map((r) => [r.id, r.n]));
   const firstPurchase = !(await first(q.select({ id: loyaltyLedger.id }).from(loyaltyLedger).where(and(eq(loyaltyLedger.customerId, c.id), eq(loyaltyLedger.type, "purchase")))));
-  const customer = { ...c, available: c.available - lapsed.n };
-  return {
-    enabled: cfg.enabled,
-    config: cfg,
-    customer,
-    knownName,
-    stats,
-    vouchers,
-    rewards: rewards.filter((r) => !rewardAvailable(r, c.tier, now) && (r.perCustomerLimit === null || (used.get(r.id) ?? 0) < r.perCustomerLimit)),
-    campaigns: camps as Campaign[],
-    firstPurchase,
-  };
+  return { ...blank, customer: c, knownName, vouchers, rewards: cfg.gifts.points ? rewards.filter((r) => r.kind === "free_item" && !rewardAvailable(r, c.tier, now)) : [], firstPurchase };
+}
+
+/** The WhatsApp messages prepared for one bill or one customer, newest first. */
+export async function messagesFor(p: URLSearchParams): Promise<LoyaltyMessage[]> {
+  const billId = (p.get("billId") ?? "").slice(0, 40);
+  const customerId = (p.get("customerId") ?? "").slice(0, 40);
+  if (!billId && !customerId) return [];
+  return db.select().from(loyaltyMessages).where(billId ? eq(loyaltyMessages.billId, billId) : eq(loyaltyMessages.customerId, customerId)).orderBy(desc(loyaltyMessages.createdAt)).limit(200);
 }
 
 /** One page of the ledger for the reports and a member's history. */
@@ -1097,7 +1089,7 @@ export async function walletView(tokenRaw: unknown) {
     customer: { code: c.code, name: c.name, tier: c.tier, available: c.available - lapsed, lifetime: c.lifetime, redeemed: c.redeemed, expired: c.expired, stamps: c.stamps, referralCode: c.referralCode, status: c.status, createdAt: c.createdAt },
     ledger: ledger.map((l) => ({ id: l.id, type: l.type, points: l.points, description: l.description, invoiceNo: l.invoiceNo, createdAt: l.createdAt })),
     vouchers: vouchers.map((v) => ({ ref: v.ref, name: v.name, status: voucherLive(v, now) ? "issued" : v.status === "issued" ? "expired" : v.status, expiresAt: v.expiresAt, issuedAt: v.issuedAt })),
-    rewards: rewards.filter((r) => !rewardAvailable(r, c.tier, now)).map((r) => ({ id: r.id, name: r.name, description: r.description, pointsCost: r.pointsCost, terms: r.terms, imageUrl: r.imageUrl })),
+    rewards: rewards.filter((r) => r.kind === "free_item" && r.trigger === "points" && !rewardAvailable(r, c.tier, now)).map((r) => ({ id: r.id, name: r.name, description: r.description, pointsCost: r.pointsCost, terms: r.terms, imageUrl: r.imageUrl })),
     expiring: lots.filter((l) => (l.expiresAt ?? 0) >= now).slice(0, 5).map((l) => ({ points: l.remaining, expiresAt: l.expiresAt! })),
     history,
   };

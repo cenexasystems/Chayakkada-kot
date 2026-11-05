@@ -34,10 +34,13 @@ const ADMIN_ONLY_OPS = new Set([
   "loyalty.delete",
   "loyalty.cancelVoucher",
   "loyalty.refund",
-  "loyalty.grant",
+  "loyalty.adjust",
   "loyalty.config",
+  "loyalty.reward.save",
   "loyalty.reward.delete",
-  "loyalty.campaign.delete",
+  "loyalty.offer.save",
+  "loyalty.offer.delete",
+  "loyalty.msg.retry",
 ]);
 
 /* POST {op, ...args} → {result} */

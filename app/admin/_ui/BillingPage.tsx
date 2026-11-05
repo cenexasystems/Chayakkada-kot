@@ -9,7 +9,7 @@ import PrintModal, { PrintFormats } from "./PrintModal";
 import { Receipt, billText, waLink, type PrintFormat } from "./receipt";
 import { Badge, Btn, Icon, Modal, WaIcon, cx, fmtTime, ago } from "./kit";
 import { UpiQrCard } from "./UpiQrCard";
-import { MemberStrip, RedeemBox, SavedLoyalty, earnPreview, loyaltyCalc, useLoyaltyLookup } from "./loyalty/billing";
+import { GiftPanel, MemberStrip, RedeemBox, SavedLoyalty, earnPreview, giftEntitlements, loyaltyCalc, selectedGift, useBillOffers, useLoyaltyLookup } from "./loyalty/billing";
 
 type Line = { key: number; productId: string | null; name: string; price: string; qty: number };
 
@@ -73,7 +73,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const [picker, setPicker] = useState<number | null>(null);
   const [picking, setPicking] = useState(false); // "Pick from catalog" (multi-add) modal
   const [done, setDone] = useState<Bill | null>(null);
-  const [tierBefore, setTierBefore] = useState(""); // the member's tier before this bill, to spot an upgrade
+  const [addedGifts, setAddedGifts] = useState<string[]>([]); // free gifts (by what entitles them) staff added to this bill
   const [busy, setBusy] = useState(false);
   // loyalty: a reward ("v:REF" voucher or "r:id" catalogue reward) and points to redeem
   // how a UPI payment reaches the shop: picked by staff, or worked out (guest's phone / the WhatsApp link we sent / the counter QR)
@@ -82,6 +82,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const [lSel, setLSel] = useState("");
   const [lPts, setLPts] = useState("");
   const loyal = useLoyaltyLookup(phone, s.version);
+  const offerLk = useBillOffers(s.version); // the shop's bill offers — they work for anyone, member or not
   // an active loyalty member decides which audience of coupons applies
   const member = loyal.lk?.customer?.status === "active";
 
@@ -110,6 +111,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     setSplitUpi("");
     setLSel("");
     setLPts("");
+    setAddedGifts([]);
     if (!keepMode) setMode("counter");
   };
 
@@ -120,6 +122,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     setPhone(x.session.customerPhone);
     setLSel("");
     setLPts("");
+    setAddedGifts([]);
     setCoupon(x.session.couponCode ?? "");
     setUpiVia("");
     setLinkSent(false);
@@ -141,12 +144,24 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const setLine = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
   /* ---------- totals ---------- */
-  const items: OrderItem[] = lines
+  const paidItems: OrderItem[] = lines
     .filter((l) => l.name.trim() || Number(l.price) > 0)
     .map((l) => ({ productId: l.productId, name: l.name.trim(), price: Math.max(0, Number(l.price) || 0), qty: l.qty }));
   const cp = s.coupons.find((c) => c.code === coupon) ?? null;
-  const billIn = { items, coupon: cp, manualType: mType, manualValue: Number(mVal) || 0, extra: Number(extra) || 0, gst: isGst, gstPercent: Number(gstPct) || 0, phone, member };
+  const billIn = { items: paidItems, coupon: cp, manualType: mType, manualValue: Number(mVal) || 0, extra: Number(extra) || 0, gst: isGst, gstPercent: Number(gstPct) || 0, phone, member };
   const base = computeBill(billIn);
+  /* Free gifts: from the shop's bill offers (anyone) and the reward the customer chose. A gift is its own ₹0 line. */
+  const rewardGift = selectedGift(loyal.lk, lSel);
+  const ents = giftEntitlements(offerLk, paidItems, Math.max(0, base.subtotal - base.couponDiscount - base.manualDiscount), rewardGift, loyal.lk?.customer?.status === "active");
+  const giftItems: OrderItem[] = ents.filter((e) => addedGifts.includes(e.key)).map((e) => ({ productId: e.productId, name: s.products.find((p) => p.id === e.productId)?.name ?? "Free gift", price: 0, qty: e.qty, free: true }));
+  const items: OrderItem[] = [...paidItems, ...giftItems];
+  const toggleGift = (key: string) => setAddedGifts((a) => (a.includes(key) ? a.filter((k) => k !== key) : [...a, key]));
+  const chooseReward = (v: string) => {
+    setLSel(v);
+    const g = selectedGift(loyal.lk, v);
+    // picking a free-gift reward adds its gift to the bill; clearing it takes it off again
+    setAddedGifts((a) => [...a.filter((k) => !k.startsWith("reward:") && !k.startsWith("voucher:")), ...(g ? [g.key] : [])]);
+  };
   const loy = loyaltyCalc({ lk: loyal.lk, sel: lSel, pts: lPts, items, products: s.products, base });
   const calc = loy.active ? computeBill({ ...billIn, rewardDiscount: loy.rewardDiscount, pointsDiscount: loy.pointsDiscount }) : base;
   const earns = earnPreview(loyal.lk, items, s.products, calc.subtotal, calc.discount);
@@ -197,7 +212,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
 
   const problems: string[] = [];
   if (mode === "tab" && !f) problems.push("Pick a customer with an open tab.");
-  if (!items.length) problems.push("Add at least one item.");
+  if (!paidItems.length) problems.push("Add at least one item.");
   if (items.some((i) => !i.name)) problems.push("Every item needs a name.");
   if (cp && calc.couponOk && !calc.couponOk.ok) problems.push(`Coupon ${cp.code}: ${calc.couponOk.reason}.`);
   if (isGst && !(gstPct !== "" && Number(gstPct) >= 0 && Number(gstPct) <= 100)) problems.push("GST should be a percentage between 0 and 100.");
@@ -239,10 +254,9 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     }
     const b = r.result;
     if (w) w.location.href = waLink(b.customerPhone, billText(b, shop, s.settings.publicUrl));
-    if (via === "print") print(<Receipt b={b} shop={shop} details={s.settings} fmt={fmt} />);
+    if (via === "print") print(<Receipt b={b} shop={shop} details={s.settings} fmt={fmt} showLoyalty={s.loyaltyEarn.display.receiptSummary} />);
     setSaveOpen(false);
     setPrinting(false);
-    setTierBefore(loyal.lk?.customer?.tier ?? "");
     setDone(b);
     reset();
   };
@@ -530,7 +544,9 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               </div>
             </div>
 
-            <RedeemBox lk={loyal.lk} sel={lSel} setSel={setLSel} pts={lPts} setPts={setLPts} info={loy} earn={earns} />
+            <RedeemBox lk={loyal.lk} sel={lSel} setSel={chooseReward} pts={lPts} setPts={setLPts} info={loy} earn={earns} />
+
+            <GiftPanel ents={ents} added={addedGifts} toggle={toggleGift} products={s.products} />
 
             <dl className="space-y-3 border-t border-dashed border-slate-200 pt-4 text-[14px]">
               <div className="flex justify-between">
@@ -551,6 +567,12 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
                   <dd className="font-semibold">-{rupee(calc.manualDiscount)}</dd>
                 </div>
               )}
+              {giftItems.map((g) => (
+                <div key={g.name + g.qty} className="flex justify-between text-emerald-700">
+                  <dt>FREE GIFT · {g.qty} × {g.name}</dt>
+                  <dd className="font-semibold">₹0</dd>
+                </div>
+              ))}
               {calc.rewardDiscount > 0 && (
                 <div className="flex justify-between text-red-600">
                   <dt>Reward · {loy.rewardName}</dt>
@@ -856,7 +878,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               {done.source === "tab" ? `${whoIs(done)}'s tab is closed.` : "Counter sale recorded."}
               {done.change > 0 && ` Give back ${rupee(done.change)} change.`}
             </p>
-            <SavedLoyalty bill={done} tierBefore={tierBefore} />
+            <SavedLoyalty bill={done} />
           </div>
         )}
       </Modal>

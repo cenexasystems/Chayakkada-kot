@@ -7,22 +7,20 @@
    never listed. Non-members come from the bills that have their mobile number. */
 
 import { useMemo, useState } from "react";
-import { segmentOf, tierByKey } from "@/lib/loyalty/engine";
-import type { LoyaltyCustomer, Segment } from "@/lib/loyalty/types";
+import type { LoyaltyCustomer } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
 import { waLink } from "../receipt";
 import { Btn, Empty, Field, Modal, WaIcon, cx, fmtDate, inputLineCls } from "../kit";
-import { useLoyaltyState, useStatsByPhone } from "./shared";
+import { useLoyaltyState } from "./shared";
 
-export type Recipient = { customer: LoyaltyCustomer; segment: Segment | null };
+export type Recipient = { customer: LoyaltyCustomer };
 export type Scope = "members" | "nonMembers" | "everyone";
 
 type Row = { key: string; name: string; phone: string; sub: string; member: boolean };
 
 export function OfferSend({ title, template, who, scope = "members", filter, onSent, onClose }: { title: string; template: string; who: string; scope?: Scope; filter?: (r: Recipient) => boolean; onSent?: (c: { name: string; phone: string }) => void | Promise<unknown>; onClose: () => void }) {
-  const { s, now } = useAdmin();
+  const { s } = useAdmin();
   const { data, error } = useLoyaltyState();
-  const stats = useStatsByPhone(s.bills, data?.config.crm.frequentDays ?? 30);
   const [tpl, setTpl] = useState(template);
   const [sent, setSent] = useState<Set<string>>(new Set());
   const shop = s.settings.shopName;
@@ -33,10 +31,8 @@ export function OfferSend({ title, template, who, scope = "members", filter, onS
     if (scope !== "nonMembers") {
       for (const c of data.customers) {
         if (c.status !== "active" || !c.consent) continue;
-        const st = stats.get(c.phone);
-        const segment = st ? segmentOf({ orders: st.orders, visits: st.visits, spent: st.spent, aov: st.aov, first: st.first, last: st.last, recentVisits: st.recentVisits }, data.config, c.tier, now) : null;
-        if (filter && !filter({ customer: c, segment })) continue;
-        out.push({ key: c.id, name: c.name, phone: c.phone, sub: tierByKey(c.tier, data.config).name, member: true });
+        if (filter && !filter({ customer: c })) continue;
+        out.push({ key: c.id, name: c.name, phone: c.whatsapp || c.phone, sub: "Loyalty customer", member: true });
       }
     }
     if (scope !== "members") {
@@ -55,7 +51,7 @@ export function OfferSend({ title, template, who, scope = "members", filter, onS
       for (const [phone, x] of [...by].sort((a, b) => b[1].last - a[1].last)) out.push({ key: phone, name: x.name || "Customer", phone, sub: `Not a member · ${x.visits} bill${x.visits === 1 ? "" : "s"} · last ${fmtDate(x.last)}`, member: false });
     }
     return scope === "members" ? out.sort((a, b) => a.name.localeCompare(b.name)) : out;
-  }, [data, stats, filter, now, scope, s.bills]);
+  }, [data, filter, scope, s.bills]);
 
   const text = (r: Row) => tpl.replaceAll("{name}", r.name.split(" ")[0] || "there").replaceAll("{shop}", shop);
   const mark = (r: Row) => {

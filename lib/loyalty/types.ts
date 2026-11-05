@@ -15,6 +15,8 @@ export type LoyaltyCustomer = {
   status: LoyaltyStatus;
   /** may we message them about offers */
   consent: boolean;
+  /** number WhatsApp messages go to; "" = the mobile number */
+  whatsapp: string;
   referralCode: string;
   referredBy: string | null;
   /** secret for the customer's own wallet page — never shown in lists */
@@ -80,6 +82,10 @@ export type Reward = {
   productId: string | null;
   /** 0 = free promotional reward */
   pointsCost: number;
+  /** "points": unlocked by collecting points. "milestone": unlocked by spending `milestoneAmount` in total. */
+  trigger: "points" | "milestone";
+  milestoneAmount: number;
+  giftQty: number;
   tiers: TierKey[];
   startsOn: string | null;
   endsOn: string | null;
@@ -108,6 +114,7 @@ export type Voucher = {
   productId: string | null;
   source: VoucherSource;
   pointsCost: number;
+  giftQty: number;
   status: VoucherStatus;
   billId: string | null;
   invoiceNo: string | null;
@@ -173,20 +180,62 @@ export type PurchaseStats = { orders: number; visits: number; spent: number; aov
 
 export type MonthRow = { month: string; earned: number; redeemed: number; expired: number; registrations: number };
 
+/** A free-gift offer on the bill itself — works for any customer, member or not. */
+export type GiftOffer = {
+  id: string;
+  name: string;
+  type: "spend" | "buy";
+  minBill: number;
+  productId: string | null;
+  buyQty: number;
+  giftProductId: string;
+  giftQty: number;
+  repeatable: boolean;
+  audience: "all" | "members";
+  maxTotal: number | null;
+  startsOn: string | null;
+  endsOn: string | null;
+  active: boolean;
+  given: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type MessageStatus = "pending" | "opened" | "failed";
+
+/** A WhatsApp message prepared for a customer. Nothing is sent automatically — see the loyalty_messages table. */
+export type LoyaltyMessage = {
+  id: string;
+  customerId: string;
+  type: string;
+  phone: string;
+  text: string;
+  status: MessageStatus;
+  error: string;
+  billId: string | null;
+  createdAt: number;
+  openedAt: number | null;
+  opens: number;
+};
+
 /** Everything the Loyalty admin page needs in one round trip. */
 export type LoyaltyState = {
   config: LoyaltyConfig;
   customers: LoyaltyCustomer[];
   rewards: Reward[];
+  offers: GiftOffer[];
   vouchers: Voucher[];
-  campaigns: Campaign[];
-  referrals: Referral[];
   audit: Audit[];
-  months: MonthRow[];
-  totals: { earned: number; redeemed: number; expired: number; /** net of everything else: points taken back when a bill was voided or refunded, manual adjustments */ adjusted: number; discounts: number; rewardDiscounts: number; rewardRedemptions: number; outstanding: number; debt: number };
+  messages: LoyaltyMessage[];
+  /** each customer's total eligible spending (completed bills, free gifts excluded) — drives spending rewards */
+  spend: Record<string, number>;
+  /** per customer, per spending reward: spending that counts towards it */
+  rewardSpend: Record<string, Record<string, number>>;
+  totals: { earned: number; redeemed: number; outstanding: number; giftsGiven: number };
   /** customer ids whose balance doesn't match their ledger / point lots — should stay empty */
   mismatched: string[];
-  expiringSoon: { customerId: string; points: number; expiresAt: number }[];
+  /** points about to expire, per customer */
+  expiring: Record<string, { points: number; expiresAt: number }>;
 };
 
 /** What Billing gets back when a mobile is looked up. */
@@ -196,11 +245,11 @@ export type LoyaltyLookup = {
   customer: LoyaltyCustomer | null;
   /** name from the customer's earlier bills, to prefill enrolment */
   knownName: string;
-  stats: PurchaseStats;
-  /** the customer's unused free rewards */
+  /** the customer's unlocked, unused free rewards (spending milestones and others) */
   vouchers: Voucher[];
-  /** catalogue rewards they could buy with points right now */
+  /** point rewards they can claim on this bill right now */
   rewards: Reward[];
-  campaigns: Campaign[];
+  /** the shop's active bill offers (these work for anyone, member or not) */
+  offers: GiftOffer[];
   firstPurchase: boolean;
 };

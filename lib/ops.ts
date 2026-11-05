@@ -4,7 +4,7 @@ import { code, uid } from "./seed";
 import { TZ, checkCoupon, computeBill, round2, shopToday } from "./money";
 import { hashPassword } from "./auth";
 import { db, type Db, type Tx } from "./db";
-import { batches, bills, coupons, expenseCategories, expenses, ingredientMoves, ingredients, meta, orders, products, recipes, sessions, settings, staffUsers, stockMovements, supplierInvoices, suppliers, approvalRequests, activityLog, loyaltyCustomers, loyaltyRewards, loyaltyCampaigns, loyaltyVouchers, productCategories } from "./db/schema";
+import { batches, bills, coupons, expenseCategories, expenses, ingredientMoves, ingredients, meta, orders, products, recipes, sessions, settings, staffUsers, stockMovements, supplierInvoices, suppliers, approvalRequests, activityLog, loyaltyCustomers, loyaltyRewards, loyaltyCampaigns, loyaltyVouchers, giftOffers, productCategories } from "./db/schema";
 import * as L from "./loyalty/server";
 import { pointsPerUnit } from "./loyalty/engine";
 import type { LoyaltyConfig } from "./loyalty/config";
@@ -404,7 +404,7 @@ export async function adminState(): Promise<AdminState> {
     bills: bls,
     coupons: cps,
     users: us.map(publicUser),
-    loyaltyEarn: { enabled: lc.enabled, earn: lc.earn },
+    loyaltyEarn: { enabled: lc.enabled, earn: lc.earn, display: lc.display },
     expenses: exps,
     expenseCategories: ecats,
     suppliers: sups,
@@ -465,7 +465,8 @@ export async function stockLedger(p: URLSearchParams): Promise<StockLedger> {
   const removed = -sum("removed");
   const returned = sum("cancelled_order") + sum("void_bill");
   const adjusted = sum("adjustment");
-  return { rows, total: n, page, pages, stats: { added, sold, removed, returned, adjusted, net: added - sold - removed + returned + adjusted }, perProduct, products };
+  const gifts = -sum("gift");
+  return { rows, total: n, page, pages, stats: { added, sold, removed, returned, adjusted, gifts, net: added - sold - removed - gifts + returned + adjusted }, perProduct, products };
 }
 
 /** The raw-ingredient ledger: paged rows, with totals and a per-ingredient summary
@@ -732,6 +733,12 @@ async function createBill(tx: Tx, a: Args, actor = "admin"): Promise<Bill> {
     if (!(price >= 0)) throw new ApiError(`Enter a price for "${name}".`);
     if (!(qty >= 1 && qty <= 999)) throw new ApiError(`Check the quantity for "${name}".`);
     const pid = str(r?.productId, 40);
+    if (r?.free === true) {
+      // a free gift: always ₹0, and always an item from the menu (checked against the bill's offers and reward below)
+      if (!pid || !known.has(pid)) throw new ApiError(`"${name}" isn't a menu item, so it can't be a free gift.`);
+      items.push({ productId: pid, name, price: 0, qty, free: true });
+      continue;
+    }
     items.push({ productId: pid && known.has(pid) ? pid : null, name, price, qty });
   }
   if (!items.length) throw new ApiError("Add at least one item to the bill.");
@@ -764,6 +771,9 @@ async function createBill(tx: Tx, a: Args, actor = "admin"): Promise<Bill> {
     voucherRef: a.voucherRef,
   });
   const calc = plan ? computeBill({ ...billInput, rewardDiscount: plan.rewardDiscount, pointsDiscount: plan.pointsDiscount }) : base;
+  // free gifts must be backed by a bill offer or the reward chosen; their labels are filled in here, never trusted from the browser
+  const gifted = await L.checkGifts(tx, items, Math.max(0, base.subtotal - base.couponDiscount - base.manualDiscount), plan, phone || s?.customerPhone || "", now);
+  items.splice(0, items.length, ...gifted.items);
 
   const payment: PayMethod = a.payment === "upi" || a.payment === "card" || a.payment === "split" ? a.payment : "cash";
   const got = num(a.received);
@@ -788,7 +798,7 @@ async function createBill(tx: Tx, a: Args, actor = "admin"): Promise<Bill> {
   // Stock: tab orders already took stock when they were placed, so only the
   // difference between what's billed and what was ordered moves stock now.
   const delta = new Map<string, number>();
-  for (const it of items) if (it.productId) delta.set(it.productId, (delta.get(it.productId) ?? 0) + it.qty);
+  for (const it of items) if (it.productId && !it.free) delta.set(it.productId, (delta.get(it.productId) ?? 0) + it.qty);
   if (s) {
     const placed = await tx.select().from(orders).where(eq(orders.sessionId, s.id));
     for (const o of placed) {
@@ -806,6 +816,11 @@ async function createBill(tx: Tx, a: Args, actor = "admin"): Promise<Bill> {
   for (const [pid, d] of delta) (d > 0 ? out : back).set(pid, -d);
   await moveStock(tx, out, { type: "sale", ref: invoiceNo, note: "Sold at billing" }, now);
   await moveStock(tx, back, { type: "adjustment", ref: invoiceNo, note: "Billed fewer than ordered" }, now);
+  // free gifts leave the same stock as anything sold, but are recorded as their own kind of movement
+  const who = [str(a.customerName, 60) || s?.customerName || "Walk-in customer", billPhone].filter(Boolean).join(" ");
+  for (const it of items) {
+    if (it.free && it.productId) await moveStock(tx, new Map([[it.productId, -it.qty]]), { type: "gift", ref: invoiceNo, note: `FREE GIFT / LOYALTY REWARD · ${it.gift || "Free gift"} · ${who} · by ${actor}` }, now);
+  }
 
   const [bill] = await tx
     .insert(bills)
@@ -854,6 +869,7 @@ async function createBill(tx: Tx, a: Args, actor = "admin"): Promise<Bill> {
   if (bill.couponCode && coupon) await tx.update(coupons).set({ used: sql`${coupons.used} + 1` }).where(eq(coupons.id, coupon.id));
   // spend, earn, stamp — in this same transaction, so a failed bill leaves points untouched
   const loyal = await L.afterBill(tx, bill, plan, actor);
+  for (const u of gifted.offerUse) await tx.update(giftOffers).set({ given: sql`${giftOffers.given} + ${u.times}` }).where(eq(giftOffers.id, u.id));
 
   if (s) {
     // the tab's phone is its key, so a different one typed at billing goes on the bill only
@@ -914,9 +930,6 @@ const APPROVAL_OPS: Record<string, { always?: boolean; create?: boolean }> = {
   "bill.edit": { always: true },
   "loyalty.update": { always: true },
   "loyalty.status": { always: true },
-  "loyalty.adjust": { always: true },
-  "loyalty.reward.save": {},
-  "loyalty.campaign.save": {},
 };
 
 /** Only plain, short values — what the admin compares in the popup. */
@@ -936,14 +949,6 @@ async function describeTarget(tx: Tx, op: string, id: string): Promise<{ name: s
     case "bill.edit": {
       const r = await must(tx.select().from(bills).where(eq(bills.id, id)), "Bill");
       return { name: r.invoiceNo, before: { ...plain(r), items: r.items } };
-    }
-    case "loyalty.reward.save": {
-      const r = await must(tx.select().from(loyaltyRewards).where(eq(loyaltyRewards.id, id)), "Reward");
-      return { name: r.name, before: plain(r) };
-    }
-    case "loyalty.campaign.save": {
-      const r = await must(tx.select().from(loyaltyCampaigns).where(eq(loyaltyCampaigns.id, id)), "Campaign");
-      return { name: r.name, before: plain(r) };
     }
     default: {
       const r = await must(tx.select().from(loyaltyCustomers).where(eq(loyaltyCustomers.id, id)), "Member");
@@ -966,7 +971,7 @@ const upiChannelOf = (v: unknown): UpiChannel | "" => UPI_CHANNELS.find((c) => c
 export function billEditPatch(b: Bill, a: Args) {
   const patch: Partial<typeof bills.$inferInsert> = {};
   const deltas = new Map<string, number>();
-  const loyaltyLocked = !!b.loyaltyCustomerId || b.pointsEarned > 0 || b.pointsRedeemed > 0 || b.rewardDiscount > 0 || b.pointsDiscount > 0;
+  const loyaltyLocked = b.items.some((i) => i.free) || !!b.loyaltyCustomerId || b.pointsEarned > 0 || b.pointsRedeemed > 0 || b.rewardDiscount > 0 || b.pointsDiscount > 0;
 
   if (a.customerName !== undefined) {
     const n = str(a.customerName, 80);
@@ -1088,7 +1093,7 @@ async function requestApproval(tx: Tx, op: string, a: Args, role: string, now: n
   const payload: Record<string, unknown> = Object.fromEntries(Object.entries(a).filter(([k]) => k !== "op"));
   if (op === "product.save") delete payload.loyaltyPoints; // points per item is the admin's call alone
   // asking again about the same thing replaces the earlier ask — except points adjustments, which each count
-  const pending = op === "loyalty.adjust" ? null : await first(tx.select().from(approvalRequests).where(and(eq(approvalRequests.targetId, id), eq(approvalRequests.kind, op), eq(approvalRequests.status, "pending"))));
+  const pending = await first(tx.select().from(approvalRequests).where(and(eq(approvalRequests.targetId, id), eq(approvalRequests.kind, op), eq(approvalRequests.status, "pending"))));
   if (pending) {
     const [x] = await tx.update(approvalRequests).set({ payload, before, requestedBy: role, createdAt: now }).where(eq(approvalRequests.id, pending.id)).returning();
     return { pendingApproval: true, request: x };
@@ -1676,7 +1681,7 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         const b = await must(tx.select().from(bills).where(eq(bills.id, id)), "Bill");
         // a completed bill still counts — put its stock and coupon use back, same as a void
         if (b.status === "completed") {
-          await restock(tx, b.items, { type: "void_bill", ref: b.invoiceNo, note: "Bill deleted" });
+          await restock(tx, (await L.getConfig(tx)).gifts.restockOnVoid ? b.items : b.items.filter((i) => !i.free), { type: "void_bill", ref: b.invoiceNo, note: "Bill deleted" }); // free gifts go back only if the owner chose that in Loyalty settings
           if (b.couponCode) await tx.update(coupons).set({ used: sql`greatest(0, ${coupons.used} - 1)` }).where(eq(coupons.code, b.couponCode));
         }
         // points, stamps, rewards and referrals go back to how they were, and every loyalty record of this bill is erased
@@ -1688,7 +1693,7 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         const b = await must(tx.select().from(bills).where(eq(bills.id, id)), "Bill");
         if (b.status === "void") return b;
         const [u] = await tx.update(bills).set({ status: "void" }).where(eq(bills.id, b.id)).returning();
-        await restock(tx, b.items, { type: "void_bill", ref: b.invoiceNo, note: "Bill voided" });
+        await restock(tx, (await L.getConfig(tx)).gifts.restockOnVoid ? b.items : b.items.filter((i) => !i.free), { type: "void_bill", ref: b.invoiceNo, note: "Bill voided" }); // free gifts go back only if the owner chose that in Loyalty settings
         if (b.couponCode) await tx.update(coupons).set({ used: sql`greatest(0, ${coupons.used} - 1)` }).where(eq(coupons.code, b.couponCode));
         await L.reverseBill(tx, b, role, 1, "Bill voided");
         return u;
@@ -1706,14 +1711,10 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         return L.setStatus(tx, a, role);
       case "loyalty.adjust":
         return L.adjustPoints(tx, a, role);
-      case "loyalty.issueReward":
-        return L.issueReward(tx, a, role);
       case "loyalty.cancelVoucher":
         return L.cancelVoucher(tx, a, role);
       case "loyalty.refund":
         return L.partialRefund(tx, a, role);
-      case "loyalty.grant":
-        return L.grant(tx, a, role);
       case "loyalty.maintain":
         return L.maintain(tx);
       case "loyalty.config":
@@ -1722,10 +1723,14 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         return L.saveReward(tx, a, role);
       case "loyalty.reward.delete":
         return L.deleteReward(tx, a, role);
-      case "loyalty.campaign.save":
-        return L.saveCampaign(tx, a, role);
-      case "loyalty.campaign.delete":
-        return L.deleteCampaign(tx, a, role);
+      case "loyalty.offer.save":
+        return L.saveOffer(tx, a, role);
+      case "loyalty.offer.delete":
+        return L.deleteOffer(tx, a, role);
+      case "loyalty.msg.open":
+        return L.openMessage(tx, a);
+      case "loyalty.msg.retry":
+        return L.retryMessage(tx, a);
     }
     throw new ApiError(`Unknown action: ${op}`);
   }

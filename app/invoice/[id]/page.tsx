@@ -1,7 +1,9 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { billForInvoice } from "@/lib/ops";
-import { TZ, payLabel, payParts } from "@/lib/money";
+import { getConfig } from "@/lib/loyalty/server";
+import { db } from "@/lib/db";
+import { TZ, loyaltySummary, payLabel, payParts } from "@/lib/money";
 import { InvoiceActions } from "./InvoiceActions";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +45,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const { id } = await params;
   const isEmbed = (await searchParams).embed === "true";
   const found = await billForInvoice(id);
+  const showLoyalty = (await getConfig(db)).display.receiptSummary; // the owner can switch the loyalty box off in Loyalty settings
 
   if (!found) {
     return (
@@ -145,10 +148,10 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               {b.items.map((it, i) => (
                 <tr key={i}>
                   <td className="py-3 text-center font-mono text-zinc-800">{i + 1}</td>
-                  <td className="py-3 font-medium text-zinc-900">{it.name}</td>
+                  <td className="py-3 font-medium text-zinc-900">{it.free ? <b>FREE GIFT · {it.name}</b> : it.name}</td>
                   <td className="py-3 text-center font-medium text-zinc-800">{it.qty}</td>
-                  <td className="py-3 text-right font-mono text-zinc-800">{inr(it.price)}</td>
-                  <td className="py-3 text-right font-mono font-semibold text-zinc-900">{inr(it.price * it.qty)}</td>
+                  <td className="py-3 text-right font-mono text-zinc-800">{it.free ? "FREE" : inr(it.price)}</td>
+                  <td className="py-3 text-right font-mono font-semibold text-zinc-900">{it.free ? "0.00" : inr(it.price * it.qty)}</td>
                 </tr>
               ))}
             </tbody>
@@ -248,6 +251,18 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             </div>
           </div>
         </div>
+
+        {showLoyalty && loyaltySummary(b) && (
+          <div className="mt-6 max-w-xs rounded-md border border-zinc-300 p-3 text-xs text-zinc-900">
+            <div className="mb-1.5 font-bold uppercase">Loyalty summary</div>
+            {loyaltySummary(b)!.map(([k, v]) => (
+              <div key={k} className="flex justify-between py-0.5">
+                <span>{k}</span>
+                <span className="font-mono font-semibold">{v}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Footer */}
         <div className="mt-12 flex flex-col items-start justify-between gap-6 border-t border-zinc-200 pt-6 text-xs sm:flex-row sm:items-end">

@@ -1,4 +1,4 @@
-import { UPI_CHANNELS, type Coupon, type DiscountType, type OrderItem } from "./types";
+import { UPI_CHANNELS, type Bill, type Coupon, type DiscountType, type OrderItem } from "./types";
 
 /* Shared by the server (authoritative totals) and the billing screen (live preview). */
 
@@ -120,4 +120,18 @@ export function mergeItems(items: OrderItem[]): OrderItem[] {
     else out.push({ ...it });
   }
   return out;
+}
+
+/** The loyalty box printed on a bill: balance before, what was earned and used, and what is left. Null when the bill
+    has no loyalty customer, so a normal bill prints exactly as before. */
+export function loyaltySummary(b: Bill): [string, string][] | null {
+  if (!b.loyaltyCustomerId) return null;
+  const used = b.loyaltyPrev !== null && b.loyaltyBalance !== null ? Math.max(0, b.loyaltyPrev + b.pointsEarned - b.loyaltyBalance) : b.pointsRedeemed;
+  const rows: [string, string][] = [];
+  if (b.loyaltyPrev !== null) rows.push(["Previous balance", `${b.loyaltyPrev} points`]);
+  rows.push(["Points earned", `${b.pointsEarned} points`]);
+  rows.push(["Points redeemed", `${used} points`]);
+  if (b.pointsDiscount > 0) rows.push(["Loyalty discount", rupee(b.pointsDiscount)]);
+  if (b.loyaltyBalance !== null) rows.push(["Remaining balance", `${b.loyaltyBalance} points`]);
+  return rows;
 }

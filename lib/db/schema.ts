@@ -165,6 +165,9 @@ export const bills = pgTable(
     rewardName: text("reward_name"),
     rewardDiscount: money("reward_discount").notNull().default(0),
     pointsEarned: integer("points_earned").notNull().default(0),
+    /** the member's points just before and just after this bill (null on bills without a member) */
+    loyaltyPrev: integer("loyalty_prev"),
+    loyaltyBalance: integer("loyalty_balance"),
     createdAt: ms("created_at").notNull(),
   },
   (t) => [uniqueIndex("bills_invoice_uq").on(t.invoiceNo), index("bills_created_idx").on(t.createdAt)],
@@ -455,6 +458,8 @@ export const loyaltyCustomers = pgTable(
     anniversary: text("anniversary").notNull().default(""),
     status: text("status").$type<LoyaltyStatus>().notNull().default("active"),
     consent: boolean("consent").notNull().default(true),
+    /** the number WhatsApp messages go to (blank = use the mobile number) */
+    whatsapp: text("whatsapp").notNull().default(""),
     referralCode: text("referral_code").notNull(),
     referredBy: text("referred_by"),
     walletToken: text("wallet_token").notNull(),
@@ -531,6 +536,10 @@ export const loyaltyRewards = pgTable("loyalty_rewards", {
   value: money("value").notNull().default(0),
   productId: text("product_id"),
   pointsCost: integer("points_cost").notNull().default(0),
+  /** "points": unlocked by collecting points. "milestone": unlocked by spending (milestoneAmount) in total */
+  trigger: text("trigger").$type<"points" | "milestone">().notNull().default("points"),
+  milestoneAmount: money("milestone_amount").notNull().default(0),
+  giftQty: integer("gift_qty").notNull().default(1),
   tiers: jsonb("tiers").$type<TierKey[]>().notNull().default([]),
   startsOn: text("starts_on"),
   endsOn: text("ends_on"),
@@ -557,6 +566,7 @@ export const loyaltyVouchers = pgTable(
     productId: text("product_id"),
     source: text("source").$type<VoucherSource>().notNull(),
     pointsCost: integer("points_cost").notNull().default(0),
+    giftQty: integer("gift_qty").notNull().default(1),
     status: text("status").$type<VoucherStatus>().notNull(),
     billId: text("bill_id"),
     invoiceNo: text("invoice_no"),
@@ -639,4 +649,51 @@ export const loyaltyAudit = pgTable(
     createdAt: ms("created_at").notNull(),
   },
   (t) => [index("loyalty_audit_created_idx").on(t.createdAt), index("loyalty_audit_customer_idx").on(t.customerId)],
+);
+
+/** A free-gift offer on the current bill ("spend ₹500, get a free juice", "buy 2 burgers, get 1 tea"). Works for everyone, member or not. */
+export const giftOffers = pgTable("gift_offers", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  /** "spend": the bill reaches minBill. "buy": the bill has buyQty of the qualifying product. */
+  type: text("type").$type<"spend" | "buy">().notNull(),
+  minBill: money("min_bill").notNull().default(0),
+  productId: text("product_id"),
+  buyQty: integer("buy_qty").notNull().default(1),
+  giftProductId: text("gift_product_id").notNull(),
+  giftQty: integer("gift_qty").notNull().default(1),
+  /** may the gift be given again for every multiple on one bill (spend ₹1000 twice → two gifts) */
+  repeatable: boolean("repeatable").notNull().default(false),
+  /** who gets it: everyone, or only loyalty customers */
+  audience: text("audience").$type<"all" | "members">().notNull().default("all"),
+  /** the most times the shop will give this gift in total (null = no limit); `given` counts so far */
+  maxTotal: integer("max_total"),
+  startsOn: text("starts_on"),
+  endsOn: text("ends_on"),
+  active: boolean("active").notNull().default(true),
+  given: integer("given").notNull().default(0),
+  createdAt: ms("created_at").notNull(),
+  updatedAt: ms("updated_at").notNull(),
+});
+
+/** Every WhatsApp message the loyalty programme prepares for a customer. There is no automatic sender:
+    "pending" = ready to send, "opened" = staff opened WhatsApp with it (delivery can't be confirmed),
+    "failed" = it could not be prepared (no valid number, or the customer has not agreed). `key` stops duplicates. */
+export const loyaltyMessages = pgTable(
+  "loyalty_messages",
+  {
+    id: text("id").primaryKey(),
+    customerId: text("customer_id").notNull(),
+    type: text("type").notNull(),
+    phone: text("phone").notNull().default(""),
+    text: text("text").notNull(),
+    status: text("status").$type<"pending" | "opened" | "failed">().notNull(),
+    error: text("error").notNull().default(""),
+    billId: text("bill_id"),
+    key: text("key"),
+    createdAt: ms("created_at").notNull(),
+    openedAt: ms("opened_at"),
+    opens: integer("opens").notNull().default(0),
+  },
+  (t) => [uniqueIndex("loyalty_messages_key_uq").on(t.key), index("loyalty_messages_customer_idx").on(t.customerId, t.createdAt)],
 );

@@ -16,6 +16,7 @@ const TYPE: Record<StockMoveType, [string, BadgeTone]> = {
   cancelled_order: ["Order cancelled", "sky"],
   void_bill: ["Bill voided", "sky"],
   adjustment: ["Adjustment", "amber"],
+  gift: ["FREE GIFT / LOYALTY REWARD", "green"],
 };
 const th = "px-4 py-3 text-left text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500 whitespace-nowrap";
 const td = "px-4 py-3 text-[13px]";
@@ -42,7 +43,7 @@ export default function StockMovementsPage() {
   const range = useMemo(() => rangeOf(period, from, to), [period, from, to]);
   const { data, loading } = useLedger({ from: range?.from, to: range?.to, type, pid, q: needle, page, size: SIZE });
   const rows = data?.rows ?? [];
-  const st = data?.stats ?? { added: 0, sold: 0, removed: 0, returned: 0, adjusted: 0, net: 0 };
+  const st = data?.stats ?? { added: 0, sold: 0, removed: 0, returned: 0, adjusted: 0, gifts: 0, net: 0 };
   const perProduct = data?.perProduct ?? [];
   const names = data?.products ?? [];
   const goto = (p: number) => setPage(Math.max(1, Math.min(data?.pages ?? 1, p)));
@@ -128,10 +129,11 @@ export default function StockMovementsPage() {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-6">
         <Kpi label="Stock added" value={`+${st.added}`} hint="Restocks and opening stock" icon="plus" tone="emerald" />
         <Kpi label="Used / sold" value={st.sold} hint="Orders and bills" icon="bag" tone="rose" />
         <Kpi label="Removed" value={st.removed} hint="Wastage, damage, own use" icon="minus" tone="amber" />
+        <Kpi label="Free gifts" value={st.gifts} hint="Loyalty rewards & offers" icon="star" tone="emerald" />
         <Kpi label="Returned" value={`+${st.returned}`} hint="Cancelled orders, voided bills" icon="refresh" tone="sky" />
         <Kpi label="Adjustments" value={`${st.adjusted > 0 ? "+" : ""}${st.adjusted}`} hint="Manual corrections" icon="sliders" tone="amber" />
       </div>

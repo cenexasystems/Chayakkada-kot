@@ -47,7 +47,7 @@ export default function PrintModal({ bill, onClose }: { bill: Bill | null; onClo
           </p>
           <PrintFormats
             onPick={(fmt) => {
-              print(<Receipt b={bill} shop={s.settings.shopName} details={s.settings} fmt={fmt} />);
+              print(<Receipt b={bill} shop={s.settings.shopName} details={s.settings} fmt={fmt} showLoyalty={s.loyaltyEarn.display.receiptSummary} />);
               onClose();
             }}
           />

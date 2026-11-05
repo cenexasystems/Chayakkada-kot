@@ -1,5 +1,5 @@
 import type { Bill, ShopDetails } from "@/lib/types";
-import { payLabel, payParts, rupee } from "@/lib/money";
+import { loyaltySummary, payLabel, payParts, rupee } from "@/lib/money";
 import { fmtDateTime } from "./kit";
 
 
@@ -14,7 +14,7 @@ export function billText(b: Bill, shop: string, publicUrl = "") {
     b.source === "tab" ? "Order from phone" : "Counter bill",
     b.customerName ? `Customer: ${b.customerName}` : "",
     "------------------------------",
-    ...b.items.map((i) => `${i.qty} × ${i.name} — ${rupee(i.price * i.qty)}`),
+    ...b.items.map((i) => (i.free ? `${i.qty} × ${i.name} — FREE GIFT ₹0` : `${i.qty} × ${i.name} — ${rupee(i.price * i.qty)}`)),
     "------------------------------",
     `Subtotal (${b.itemCount} items): ${rupee(b.subtotal)}`,
     b.couponDiscount ? `Coupon ${b.couponCode} (${b.couponPercent}%): -${rupee(b.couponDiscount)}` : "",
@@ -26,7 +26,7 @@ export function billText(b: Bill, shop: string, publicUrl = "") {
     `*Grand total: ${rupee(b.total)}*`,
     `Paid by ${payLabel(b)}`,
     b.payment === "split" ? `  ${payParts(b).map(([m, n]) => `${m} ${rupee(n)}`).join(" · ")}` : "",
-    b.pointsEarned ? `You earned ${b.pointsEarned} loyalty points on this bill.` : "",
+    ...(loyaltySummary(b) ? ["Loyalty summary", ...loyaltySummary(b)!.map(([k, v]) => `  ${k}: ${v}`)] : []),
     "",
     `View your invoice: ${invoiceUrl(b, publicUrl)}`,
     "",
@@ -64,7 +64,9 @@ export function headerLines(d?: ShopDetails): string[] {
 }
 
 /** Receipt for the chosen printer, rendered into the print area. */
-export function Receipt({ b, shop, details, fmt = DEFAULT_FORMAT }: { b: Bill; shop: string; details?: ShopDetails; fmt?: PrintFormat }) {
+export function Receipt({ b: bill, shop, details, fmt = DEFAULT_FORMAT, showLoyalty = true }: { b: Bill; shop: string; details?: ShopDetails; fmt?: PrintFormat; showLoyalty?: boolean }) {
+  // the owner can switch the loyalty box off in Loyalty settings
+  const b = showLoyalty ? bill : { ...bill, loyaltyCustomerId: null };
   return (
     <>
       <style>{pageCss(fmt)}</style>
@@ -119,10 +121,10 @@ function Sheet({ b, shop, logo, lines, size }: { b: Bill; shop: string; logo?: s
           {b.items.map((i, k) => (
             <tr key={k}>
               <td>{k + 1}</td>
-              <td>{i.name}</td>
+              <td>{i.free ? <b>FREE GIFT · {i.name}</b> : i.name}</td>
               <td className="n">{i.qty}</td>
-              <td className="n">{rupee(i.price)}</td>
-              <td className="n">{rupee(i.qty * i.price)}</td>
+              <td className="n">{i.free ? "FREE" : rupee(i.price)}</td>
+              <td className="n">{i.free ? "₹0" : rupee(i.qty * i.price)}</td>
             </tr>
           ))}
         </tbody>
@@ -196,6 +198,23 @@ function Sheet({ b, shop, logo, lines, size }: { b: Bill; shop: string; logo?: s
         )}
       </dl>
 
+      {loyaltySummary(b) && (
+        <dl className="inv__sum" aria-label="Loyalty summary">
+          <div>
+            <dt>
+              <b>Loyalty summary</b>
+            </dt>
+            <dd />
+          </div>
+          {loyaltySummary(b)!.map(([k, v]) => (
+            <div key={k}>
+              <dt>{k}</dt>
+              <dd>{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
       <footer className="inv__foot">Thank you for visiting — see you again soon!</footer>
     </div>
   );
@@ -218,12 +237,12 @@ function Thermal({ b, shop, logo, lines, roll }: { b: Bill; shop: string; logo?:
       <hr />
       {b.items.map((i, k) => (
         <div key={k}>
-          <div>{i.name}</div>
+          <div>{i.free ? `FREE GIFT · ${i.name}` : i.name}</div>
           <div className="row">
             <span>
-              {i.qty} × {rupee(i.price)}
+              {i.qty} × {i.free ? "FREE" : rupee(i.price)}
             </span>
-            <span>{rupee(i.qty * i.price)}</span>
+            <span>{i.free ? "₹0" : rupee(i.qty * i.price)}</span>
           </div>
         </div>
       ))}
@@ -293,6 +312,20 @@ function Thermal({ b, shop, logo, lines, roll }: { b: Bill; shop: string; logo?:
           <span>Change</span>
           <span>{rupee(b.change)}</span>
         </div>
+      )}
+      {loyaltySummary(b) && (
+        <>
+          <hr />
+          <div>
+            <b>Loyalty summary</b>
+          </div>
+          {loyaltySummary(b)!.map(([k, v]) => (
+            <div key={k} className="row">
+              <span>{k}</span>
+              <span>{v}</span>
+            </div>
+          ))}
+        </>
       )}
       <hr />
       <p className="c">thank you — come again</p>

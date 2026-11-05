@@ -47,20 +47,21 @@ export function occasionYear(dateStr: string, window: number, now = Date.now()):
 /* ---------------- line eligibility ---------------- */
 export type CatOf = (productId: string | null) => string;
 
-const excluded = (it: OrderItem, catOf: CatOf, ids: string[], cats: string[]) => (!!it.productId && ids.includes(it.productId)) || (cats.length > 0 && cats.includes(catOf(it.productId)));
+const excluded = (it: OrderItem, catOf: CatOf, ids: string[], cats: string[]) => !!it.free || (!!it.productId && ids.includes(it.productId)) || (cats.length > 0 && cats.includes(catOf(it.productId)));
 
 export const eligibleSubtotal = (items: OrderItem[], catOf: CatOf, ids: string[], cats: string[]) => round2(items.reduce((a, it) => a + (excluded(it, catOf, ids, cats) ? 0 : it.price * it.qty), 0));
 
 /* ---------------- rewards & vouchers ---------------- */
-type RewardLike = Pick<Reward, "kind" | "value" | "productId" | "name">;
+type RewardLike = Pick<Reward, "kind" | "value" | "productId" | "name"> & { giftQty?: number };
 
 /** What a reward takes off a bill whose amount after coupon & manual discount is `afterManual`.
     A free item needs that item on the bill; it's worth one of it. */
 export function rewardValue(r: RewardLike, items: OrderItem[], afterManual: number): { amount: number; reason: string } {
   if (r.kind === "free_item") {
-    const line = items.find((i) => i.productId && i.productId === r.productId);
-    if (!line) return { amount: 0, reason: `Add the free item for "${r.name}" to the bill first` };
-    return { amount: round2(Math.min(afterManual, line.price)), reason: "" };
+    /* a free gift costs the customer nothing: it is its own ₹0 "FREE GIFT" line, so there is no discount to take off */
+    const given = items.filter((i) => i.free && i.productId && i.productId === r.productId).reduce((a, i) => a + i.qty, 0);
+    if (given < Math.max(1, r.giftQty ?? 1)) return { amount: 0, reason: `Add the free gift for "${r.name}" to the bill first` };
+    return { amount: 0, reason: "" };
   }
   if (r.kind === "percent") return { amount: Math.round((afterManual * Math.min(100, r.value)) / 100), reason: "" };
   return { amount: round2(Math.min(afterManual, r.value)), reason: "" };
@@ -95,21 +96,30 @@ export type RedeemCtx = {
 };
 
 /** The most points this bill can take, and why not more. */
-export function redeemCap(c: RedeemCtx): { maxPoints: number; maxAmount: number; reason: string } {
+export function redeemCap(c: RedeemCtx): { maxPoints: number; minPoints: number; maxAmount: number; reason: string } {
   const r = c.cfg.redeem;
-  const no = (reason: string) => ({ maxPoints: 0, maxAmount: 0, reason });
+  const no = (reason: string) => ({ maxPoints: 0, minPoints: 0, maxAmount: 0, reason });
   if (!c.cfg.enabled || !r.enabled) return no("Points redemption is switched off");
   if (c.couponApplied && !r.withCoupon) return no("Points can't be used together with a coupon");
   if (c.manualApplied && !r.withManual) return no("Points can't be used together with a manual discount");
   if (c.rewardApplied && !r.withReward) return no("Points can't be used together with a reward");
-  if (c.available < r.minPoints) return no(`Needs at least ${r.minPoints} points`);
   const elig = eligibleSubtotal(c.items, c.catOf, r.excludedProductIds, r.excludedCategories);
   const share = c.subtotal > 0 ? elig / c.subtotal : 0;
-  let amount = (Math.max(0, c.remaining) * share * r.maxPercent) / 100;
-  if (r.maxAmount > 0) amount = Math.min(amount, r.maxAmount);
-  const maxPoints = Math.min(c.available, Math.floor(amount / r.pointValue + 1e-9));
-  if (maxPoints < r.minPoints) return no(maxPoints > 0 ? `Bill too small — at least ${r.minPoints} points must be used` : "Nothing on this bill can be paid with points");
-  return { maxPoints, maxAmount: pointsValue(maxPoints, c.cfg), reason: "" };
+  /* the "eligible bill amount": what is left to pay for items that may be paid with points */
+  const eligible = round2(Math.max(0, c.remaining) * share);
+  const range = redeemRange(eligible, r.ranges);
+  if (!range) return no(eligible > 0 ? `No points range is set for a bill of ₹${Math.floor(eligible)}` : "Nothing on this bill can be paid with points");
+  if (c.available < range.min) return no(`A bill of ₹${Math.floor(eligible)} needs at least ${range.min} points to redeem — ${c.available} available`);
+  // never more than the range allows, the customer owns, or the eligible amount itself
+  const maxPoints = Math.min(c.available, range.max, Math.floor(eligible / r.pointValue + 1e-9));
+  if (maxPoints < range.min) return no("The bill is too small for the minimum points in its range");
+  return { maxPoints, minPoints: range.min, maxAmount: pointsValue(maxPoints, c.cfg), reason: "" };
+}
+
+/** The range that covers a bill of this eligible amount (whole rupees: ₹200.50 counts as ₹200). The lowest range wins if two overlap. */
+export function redeemRange(amount: number, ranges: LoyaltyConfig["redeem"]["ranges"]) {
+  const a = Math.floor(amount + 1e-9);
+  return [...ranges].sort((x, y) => x.from - y.from).find((r) => a >= r.from && (r.to === null || a <= r.to)) ?? null;
 }
 
 export const pointsValue = (points: number, cfg: LoyaltyConfig) => round2(points * cfg.redeem.pointValue);
