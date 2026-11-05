@@ -357,7 +357,7 @@ html:has(.adm) {
 .rcpt {
   width: 72mm;
   margin: 0 auto;
-  font: 400 10pt/1.35 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font: 500 10pt/1.35 ui-monospace, "Cascadia Mono", Consolas, monospace;
   color: #000;
 }
 .rcpt h1 {
@@ -395,7 +395,7 @@ html:has(.adm) {
 
 /* A3 / A4 / A5 invoice — sized in em, so paper size only changes font-size */
 .inv {
-  font: 400 11pt/1.45 var(--body), "Segoe UI", Arial, sans-serif;
+  font: 500 11pt/1.45 var(--body), "Segoe UI", Arial, sans-serif;
   color: #000;
 }
 .inv--a5 {
@@ -423,7 +423,7 @@ html:has(.adm) {
   line-height: 1.1;
 }
 .inv__head p {
-  color: #444;
+  color: #000;
 }
 .inv__meta {
   text-align: right;
@@ -444,7 +444,7 @@ html:has(.adm) {
   font-size: 0.75em;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #666;
+  color: #111;
 }
 .inv__r {
   text-align: right;
@@ -457,13 +457,13 @@ html:has(.adm) {
 .inv__tbl td {
   padding: 0.45em 0.5em;
   text-align: left;
-  border-bottom: 1px solid #ccc;
+  border-bottom: 1px solid #555;
 }
 .inv__tbl th {
   font-size: 0.8em;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  background: #f1f1f1;
+  background: #e2e2e2;
   border-bottom: 1px solid #000;
 }
 .inv__tbl .n {
@@ -499,5 +499,5 @@ html:has(.adm) {
   margin-top: 2.5em;
   text-align: center;
   font-size: 0.85em;
-  color: #555;
+  color: #111;
 }

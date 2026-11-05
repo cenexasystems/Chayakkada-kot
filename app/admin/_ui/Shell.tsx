@@ -71,8 +71,8 @@ function Settings({ onClose }: { onClose: () => void }) {
 
   const d = s.settings;
   const [form, setForm] = useState({
-    shopName: d.shopName, ownerName: d.ownerName, location: d.location, address: d.address, address2: d.address2,
-    whatsapp1: d.whatsapp1, whatsapp2: d.whatsapp2, customerCare: d.customerCare, email: d.email, mapsUrl: d.mapsUrl, logoUrl: d.logoUrl,
+    shopName: d.shopName, ownerName: d.ownerName, location: d.location, address: d.address, address2: "",
+    whatsapp1: d.whatsapp1, whatsapp2: "", customerCare: d.customerCare, email: d.email, mapsUrl: d.mapsUrl, logoUrl: d.logoUrl,
     upiId: d.upiId, upiName: d.upiName, upiPhone: d.upiPhone, upiQrMinutes: String(d.upiQrMinutes),
   });
   const [saving, setSaving] = useState(false);
@@ -117,10 +117,8 @@ function Settings({ onClose }: { onClose: () => void }) {
           <Field label="Shop name"><input className={inputCls} value={form.shopName} maxLength={60} onChange={set("shopName")} /></Field>
           <Field label="Owner's name"><input className={inputCls} value={form.ownerName} maxLength={80} onChange={set("ownerName")} /></Field>
           <Field label="Location"><input className={inputCls} value={form.location} maxLength={120} onChange={set("location")} /></Field>
-          <Field label="Branch 1 address" hint="One line per row"><textarea className={cx(inputCls, "h-24 py-2")} value={form.address} onChange={set("address")} /></Field>
-          <Field label="Branch 1 WhatsApp"><input className={inputCls} inputMode="tel" value={form.whatsapp1} maxLength={30} onChange={set("whatsapp1")} placeholder="10-digit number" /></Field>
-          <Field label="Branch 2 address" hint="Leave blank if there is no second branch"><textarea className={cx(inputCls, "h-24 py-2")} value={form.address2} onChange={set("address2")} /></Field>
-          <Field label="Branch 2 WhatsApp"><input className={inputCls} inputMode="tel" value={form.whatsapp2} maxLength={30} onChange={set("whatsapp2")} placeholder="10-digit number" /></Field>
+          <Field label="Address" hint="One line per row"><textarea className={cx(inputCls, "h-24 py-2")} value={form.address} onChange={set("address")} /></Field>
+          <Field label="WhatsApp number"><input className={inputCls} inputMode="tel" value={form.whatsapp1} maxLength={30} onChange={set("whatsapp1")} placeholder="10-digit number" /></Field>
           <Field label="Customer service number"><input className={inputCls} inputMode="tel" value={form.customerCare} maxLength={30} onChange={set("customerCare")} /></Field>
           <Field label="Email"><input className={inputCls} type="email" value={form.email} maxLength={120} onChange={set("email")} /></Field>
           <Field label="Google Maps link"><input className={inputCls} value={form.mapsUrl} maxLength={500} onChange={set("mapsUrl")} placeholder="https://maps.app.goo.gl/…" /></Field>

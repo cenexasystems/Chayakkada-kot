@@ -58,7 +58,7 @@ const pageCss = (f: PrintFormat) =>
 export function headerLines(d?: ShopDetails): string[] {
   if (!d) return [];
   const addr = (t: string) => t.split("\n").filter(Boolean).join(", ");
-  const lines = [addr(d.address), addr(d.address2)].filter(Boolean);
+  const lines = [addr(d.address)].filter(Boolean);
   const contact = [d.customerCare && `Ph: ${d.customerCare}`, d.email].filter(Boolean).join(" · ");
   return contact ? [...lines, contact] : lines;
 }

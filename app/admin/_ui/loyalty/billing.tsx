@@ -90,14 +90,15 @@ export function loyaltyCalc(x: { lk: LoyaltyLookup | null; sel: string; pts: str
     }
   }
   const cap = redeemCap({ cfg, items, catOf, subtotal: base.subtotal, remaining: afterManual - rewardDiscount, available: Math.max(0, c.available - spend), couponApplied: base.couponDiscount > 0, manualApplied: base.manualDiscount > 0, rewardApplied: !!payload.rewardId || !!payload.voucherRef });
-  const points = Math.max(0, Math.floor(Number(x.pts) || 0));
+  /* If points can't be used on this bill at all (e.g. the member has fewer than the minimum), whatever was typed
+     is simply ignored — it never stops the bill from being saved. */
+  const points = cap.reason ? 0 : Math.max(0, Math.floor(Number(x.pts) || 0));
   if (points) {
-    if (cap.reason) problems.push(cap.reason + ".");
-    else if (points < cfg.redeem.minPoints) problems.push(`Redeem at least ${cfg.redeem.minPoints} points at a time.`);
+    if (points < cfg.redeem.minPoints) problems.push(`Redeem at least ${cfg.redeem.minPoints} points at a time.`);
     else if (points > cap.maxPoints) problems.push(`At most ${cap.maxPoints} points can be used on this bill.`);
     payload.loyaltyPoints = points;
   }
-  return { active: true, rewardDiscount, pointsDiscount: points && !cap.reason ? pointsValue(Math.min(points, cap.maxPoints), cfg) : 0, points, rewardName, problems, cap, payload };
+  return { active: true, rewardDiscount, pointsDiscount: points ? pointsValue(Math.min(points, cap.maxPoints), cfg) : 0, points, rewardName, problems, cap, payload };
 }
 
 /** Points the bill should earn — the same formula the server runs after payment. */

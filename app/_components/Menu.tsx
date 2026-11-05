@@ -212,14 +212,13 @@ function waHref(n: string) {
 function ShopContact({ d }: { d: TabView["details"] }) {
   const branches = [
     { n: 1, address: d.address, wa: d.whatsapp1 },
-    { n: 2, address: d.address2, wa: d.whatsapp2 },
   ].filter((b) => b.address || b.wa);
   if (!branches.length && !d.customerCare && !d.email && !d.mapsUrl) return null;
   return (
     <section className="tm-contact" aria-label="Contact">
       {branches.map((b) => (
         <div key={b.n} className="tm-contact__card">
-          <small>{branches.length > 1 ? `Branch ${b.n}` : d.location || "Find us"}</small>
+          <small>{d.location || "Find us"}</small>
           {b.address && <p>{b.address.split("\n").map((l, i) => <span key={i}>{l}</span>)}</p>}
           {b.wa && <a href={waHref(b.wa)} target="_blank" rel="noopener noreferrer">WhatsApp {b.wa}</a>}
         </div>
