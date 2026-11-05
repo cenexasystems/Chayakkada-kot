@@ -381,6 +381,21 @@ export async function queueMessage(tx: Tx, c: LoyaltyCustomer, type: MessageKey,
   return m;
 }
 
+/** The welcome message for a customer who has just agreed to WhatsApp messages (they didn't tick the box when they
+    joined). Records their consent, then prepares the message — or returns the one that already exists. */
+export async function welcomeMessage(tx: Tx, a: Args, actor: string): Promise<LoyaltyMessage> {
+  const c = await mustCustomer(tx, str(a.id, 40));
+  if (!c.consent) {
+    await tx.update(loyaltyCustomers).set({ consent: true, updatedAt: Date.now() }).where(eq(loyaltyCustomers.id, c.id));
+    c.consent = true;
+    await audit(tx, actor, "customer.update", { customerId: c.id, ref: c.code, before: { consent: false }, after: { consent: true }, reason: "Agreed to WhatsApp messages when joining" });
+  }
+  const made = await queueMessage(tx, c, "enrol", {}, `enrol:${c.id}`);
+  const m = made ?? (await first(tx.select().from(loyaltyMessages).where(eq(loyaltyMessages.key, `enrol:${c.id}`))));
+  if (!m) throw new ApiError("Welcome messages are switched off in Loyalty settings.");
+  return m;
+}
+
 /** Staff opened WhatsApp with this message. We can't know it was delivered, so it is recorded as "opened", never "sent". */
 export async function openMessage(tx: Tx, a: Args) {
   const m = await first(tx.select().from(loyaltyMessages).where(eq(loyaltyMessages.id, str(a.id, 40))));

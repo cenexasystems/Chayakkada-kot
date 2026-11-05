@@ -7,7 +7,7 @@ import type { Bill } from "@/lib/types";
 import type { LedgerEntry, LoyaltyCustomer, LoyaltyMessage, LoyaltyState } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
 import { Badge, Btn, Empty, Field, Modal, SearchBox, cx, downloadExcel, fmtDate, fmtDateTime, inputLineCls } from "../kit";
-import { MSG_LABEL, MessageList, MessageModal } from "./notify";
+import { MSG_LABEL, MessageList, MessageModal, WelcomeStep, type Joined } from "./notify";
 import { EARN_TYPES, LEDGER_LABEL, Pager, Stat, USE_TYPES, th, td, tableWrap, usePaged, within, type PeriodData } from "./shared";
 
 const sel = "h-10 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700 outline-none focus:border-slate-400";
@@ -126,7 +126,7 @@ function CustomerForm({ customer, onClose, onDone }: { customer?: LoyaltyCustome
   const { act, toast, s } = useAdmin();
   const [f, setF] = useState({ name: customer?.name ?? "", phone: customer?.phone ?? "", whatsapp: customer?.whatsapp ?? "", consent: customer?.consent ?? s.loyaltyEarn.display.defaultConsent });
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState<LoyaltyMessage[] | null>(null);
+  const [joined, setJoined] = useState<Joined | null>(null);
   const save = async () => {
     setBusy(true);
     const r = customer
@@ -138,11 +138,12 @@ function CustomerForm({ customer, onClose, onDone }: { customer?: LoyaltyCustome
     if (!customer) {
       const m = (r.result as { message: LoyaltyMessage | null }).message;
       toast({ kind: "ok", title: `${f.name} joined the loyalty programme` });
-      if (m) return setSent([m]);
+      const c = r.result as LoyaltyCustomer;
+      return setJoined({ id: c.id, name: c.name, message: m });
     }
     onClose();
   };
-  if (sent) return <MessageModal title="Send the welcome message" messages={sent} onClose={onClose} />;
+  if (joined) return <WelcomeStep joined={joined} onClose={onClose} />;
   return (
     <Modal
       open

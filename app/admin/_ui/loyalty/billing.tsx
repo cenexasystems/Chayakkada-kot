@@ -12,7 +12,7 @@ import { earnFor, pointsValue, redeemCap, rewardValue, voucherLive } from "@/lib
 import { offerEntitlements, type Entitlement } from "@/lib/loyalty/gifts";
 import { useAdmin } from "../Store";
 import { Badge, Btn, Icon, Modal, inputLineCls, labelCls } from "../kit";
-import { MessageList, MessageModal } from "./notify";
+import { MessageList, type Joined } from "./notify";
 
 const okPhone = (p: string) => /^[6-9]\d{9}$/.test(p);
 
@@ -142,11 +142,11 @@ export function earnPreview(lk: LoyaltyLookup | null, items: OrderItem[], produc
 }
 
 /* ---------------- customer strip (under Customer details) ---------------- */
-export function MemberStrip({ phone, name, lk, loading, onEnrolled }: { phone: string; name: string; lk: LoyaltyLookup | null; loading: boolean; onEnrolled: () => void }) {
+export function MemberStrip({ phone, name, lk, loading, onEnrolled, onJoined }: { phone: string; name: string; lk: LoyaltyLookup | null; loading: boolean; onEnrolled: () => void; onJoined: (j: Joined) => void }) {
   const [enrol, setEnrol] = useState(false);
-  /* The sign-up pop-up lives here, outside the "not a member" strip: registering makes the customer a member, which
-     replaces that strip — and the welcome-message step must stay open until it is closed. */
-  const modal = enrol ? <EnrolModal phone={phone} name={name || lk?.knownName || ""} onClose={() => setEnrol(false)} onDone={onEnrolled} /> : null;
+  /* The form closes as soon as the customer is added; the welcome-message step that follows is shown by the Billing page
+     itself (onJoined), because adding the customer replaces this strip and would take anything inside it away. */
+  const modal = enrol ? <EnrolModal phone={phone} name={name || lk?.knownName || ""} onClose={() => setEnrol(false)} onDone={onEnrolled} onJoined={onJoined} /> : null;
   if (!okPhone(phone) && !enrol) return null;
   if (loading && !lk) return <>{modal ?? <p className="mt-3 text-[12px] text-slate-400">Checking loyalty…</p>}</>;
   if (!lk || !lk.enabled) return modal;
@@ -181,24 +181,20 @@ export function MemberStrip({ phone, name, lk, loading, onEnrolled }: { phone: s
   );
 }
 
-function EnrolModal({ phone, name: start, onClose, onDone }: { phone: string; name: string; onClose: () => void; onDone: () => void }) {
+function EnrolModal({ phone, name: start, onClose, onDone, onJoined }: { phone: string; name: string; onClose: () => void; onDone: () => void; onJoined: (j: Joined) => void }) {
   const { act, toast, s } = useAdmin();
   const [f, setF] = useState({ name: start, whatsapp: "", consent: s.loyaltyEarn.display.defaultConsent });
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState<LoyaltyMessage[] | null>(null);
   const save = async () => {
     setBusy(true);
     const r = await act<LoyaltyCustomer & { message: LoyaltyMessage | null }>("loyalty.register", { phone, ...f });
     setBusy(false);
     if (!r.ok) return;
     toast({ kind: "ok", title: `${r.result.name} joined the loyalty programme` });
-    if (r.result.message) setSent([r.result.message]);
-    else {
-      onDone();
-      onClose();
-    }
+    onJoined({ id: r.result.id, name: r.result.name, message: r.result.message });
+    onDone();
+    onClose();
   };
-  if (sent) return <MessageModal title="Send the welcome message" messages={sent} onClose={() => (onDone(), onClose())} />;
   return (
     <Modal
       open

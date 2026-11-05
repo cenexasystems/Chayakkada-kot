@@ -95,6 +95,43 @@ export function MessageList({ messages, onChanged, empty = "No WhatsApp messages
   );
 }
 
+export type Joined = { id: string; name: string; message: LoyaltyMessage | null };
+
+/** Shown right after a customer joins the loyalty programme. With a welcome message, it is ready to send. Without one
+    (the customer didn't agree to WhatsApp messages), it says so and lets staff record their consent and prepare it. */
+export function WelcomeStep({ joined, onClose }: { joined: Joined; onClose: () => void }) {
+  const { act } = useAdmin();
+  const [msg, setMsg] = useState<LoyaltyMessage | null>(joined.message);
+  const [busy, setBusy] = useState(false);
+  if (msg) return <MessageModal title="Send the welcome message" messages={[msg]} onClose={onClose} />;
+  const ask = async () => {
+    setBusy(true);
+    const r = await act<LoyaltyMessage>("loyalty.welcome", { id: joined.id });
+    setBusy(false);
+    if (r.ok) setMsg(r.result);
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Added to loyalty"
+      footer={
+        <>
+          <Btn onClick={onClose}>Done</Btn>
+          <Btn kind="green" disabled={busy} onClick={ask}>
+            <WaIcon size={15} /> {busy ? "Preparing…" : "They agree — prepare welcome message"}
+          </Btn>
+        </>
+      }
+    >
+      <p className="text-[13.5px] leading-relaxed text-slate-700">
+        <b>{joined.name}</b> is now in the loyalty programme. No welcome message was prepared, because they didn&apos;t agree to WhatsApp messages when they joined.
+      </p>
+      <p className="mt-2 text-[12.5px] text-slate-500">If they say yes now, press the green button — it records their agreement and prepares the welcome message for you to send.</p>
+    </Modal>
+  );
+}
+
 /** Pop-up shown right after something prepared a message (enrolment, a points adjustment). */
 export function MessageModal({ messages, title, onClose }: { messages: LoyaltyMessage[]; title: string; onClose: () => void }) {
   return (

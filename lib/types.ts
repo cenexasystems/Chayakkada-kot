@@ -235,6 +235,7 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   "loyalty.offer.delete": "Removed a bill offer",
   "loyalty.msg.open": "Opened a loyalty WhatsApp message",
   "loyalty.msg.retry": "Retried a loyalty WhatsApp message",
+  "loyalty.welcome": "Prepared a loyalty welcome message",
   "loyalty.reward.delete": "Removed a reward",
   "loyalty.campaign.save": "Saved a campaign",
   "loyalty.campaign.delete": "Removed a campaign",
@@ -417,6 +418,10 @@ export type IngredientMove = {
   batchId: string | null;
   /** Human-readable name of the batch this line came from, when a batch produced it. */
   batchName: string;
+  /** the note typed for the whole batch ("Any details to remember") */
+  batchNote: string;
+  /** the inventory items this batch produced, e.g. "2 × Veg Burger" — where the ingredient was used */
+  madeFor: string;
   note: string;
   createdAt: number;
 };

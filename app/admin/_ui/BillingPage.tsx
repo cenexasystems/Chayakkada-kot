@@ -10,6 +10,7 @@ import { Receipt, billText, waLink, type PrintFormat } from "./receipt";
 import { Badge, Btn, Icon, Modal, WaIcon, cx, fmtTime, ago } from "./kit";
 import { UpiQrCard } from "./UpiQrCard";
 import { pointsPerUnit } from "@/lib/loyalty/engine";
+import { WelcomeStep, type Joined } from "./loyalty/notify";
 import { GiftPanel, MemberStrip, RedeemBox, SavedLoyalty, earnPreview, giftEntitlements, loyaltyCalc, selectedGift, useBillOffers, useLoyaltyLookup } from "./loyalty/billing";
 
 type Line = { key: number; productId: string | null; name: string; price: string; qty: number };
@@ -83,6 +84,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
   const [picker, setPicker] = useState<number | null>(null);
   const [picking, setPicking] = useState(false); // "Pick from catalog" (multi-add) modal
   const [done, setDone] = useState<Bill | null>(null);
+  const [joined, setJoined] = useState<Joined | null>(null); // a customer just added to loyalty: the welcome-message step
   const [addedGifts, setAddedGifts] = useState<string[]>(d?.addedGifts ?? []); // free gifts (by what entitles them) staff added to this bill
   const [busy, setBusy] = useState(false);
   // loyalty: a reward ("v:REF" voucher or "r:id" catalogue reward) and points to redeem
@@ -390,7 +392,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
                 <input className={cx(big, phone && !okPhone(phone) && "border-amber-500")} value={phone} onChange={(e) => (setPhone(tenDigits(e.target.value)), setLSel(""), setLPts(""))} placeholder="Enter 10-digit number" inputMode="numeric" autoComplete="tel-national" />
               </label>
             </div>
-            <MemberStrip phone={phone} name={name} lk={loyal.lk} loading={loyal.loading} onEnrolled={loyal.reload} />
+            <MemberStrip phone={phone} name={name} lk={loyal.lk} loading={loyal.loading} onEnrolled={loyal.reload} onJoined={setJoined} />
           </section>
 
           <section className={box}>
@@ -901,6 +903,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
           </div>
         )}
       </Modal>
+      {joined && <WelcomeStep joined={joined} onClose={() => setJoined(null)} />}
       <Modal
         open={!!newCp}
         onClose={() => setNewCp(null)}

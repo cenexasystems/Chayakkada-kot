@@ -39,6 +39,8 @@ export async function GET(req: Request) {
     { header: "Cost (₹)", key: "cost", width: 12 },
     { header: "Balance after", key: "balance", width: 14 },
     { header: "Batch", key: "batch", width: 16 },
+    { header: "Made (where it was used)", key: "madeFor", width: 26 },
+    { header: "Batch note", key: "batchNote", width: 30 },
     { header: "Note", key: "note", width: 40 },
   ];
   for (const r of rows) {
@@ -51,6 +53,8 @@ export async function GET(req: Request) {
       cost: r.cost,
       balance: r.balanceAfter,
       batch: r.batchName || "",
+      madeFor: r.madeFor || "",
+      batchNote: r.batchNote || "",
       note: r.note,
     });
   }

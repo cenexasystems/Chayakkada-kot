@@ -237,7 +237,11 @@ export default function IngredientMovesPage() {
                       <td className={cx(td, "text-right adm-num font-semibold", r.qty < 0 ? "text-red-600" : "text-emerald-700")}>{r.qty > 0 ? "+" : ""}{num3(r.qty)}{r.unit}</td>
                       <td className={cx(td, "text-right adm-num")}>{r.cost > 0 ? rupee(r.cost) : <span className="text-slate-400">—</span>}</td>
                       <td className={cx(td, "text-right adm-num")}>{num3(r.balanceAfter)}{r.unit}</td>
-                      <td className={cx(td, "font-semibold text-slate-800")}>{r.batchName || <span className="font-normal text-slate-400">—</span>}</td>
+                      <td className={cx(td, "font-semibold text-slate-800")}>
+                        {r.batchName || <span className="font-normal text-slate-400">—</span>}
+                        {r.madeFor && <span className="mt-0.5 block text-[12px] font-semibold text-emerald-700">Made: {r.madeFor}</span>}
+                        {r.batchNote && <span className="mt-0.5 block text-[11.5px] font-normal text-slate-500">{r.batchNote}</span>}
+                      </td>
                       <td className={cx(td, "text-slate-600")}>{r.note || <span className="text-slate-400">—</span>}</td>
                     </tr>
                   ))}

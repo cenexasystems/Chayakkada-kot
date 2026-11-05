@@ -486,10 +486,10 @@ export async function ingredientLedger(p: URLSearchParams): Promise<IngredientLe
     inRange,
     type !== "all" ? eq(M.type, type as IngredientMoveType) : undefined,
     iid !== "all" ? eq(M.ingredientId, iid) : undefined,
-    q ? or(ilike(M.ingredientName, `%${q}%`), ilike(M.note, `%${q}%`)) : undefined,
+    q ? or(ilike(M.ingredientName, `%${q}%`), ilike(M.note, `%${q}%`), ilike(batches.note, `%${q}%`), ilike(batches.name, `%${q}%`)) : undefined,
   );
 
-  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(M).where(where);
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(M).leftJoin(batches, eq(batches.id, M.batchId)).where(where);
   const pages = Math.max(1, Math.ceil(n / size));
   const page = Math.min(pages, Math.max(1, Math.floor(Number(p.get("page"))) || 1));
 
@@ -521,6 +521,9 @@ export async function ingredientLedger(p: URLSearchParams): Promise<IngredientLe
         balanceAfter: M.balanceAfter,
         batchId: M.batchId,
         batchName: sql<string>`coalesce(${batches.name}, '')`,
+        batchNote: sql<string>`coalesce(${batches.note}, '')`,
+        // what the batch was made into, e.g. "2 × Veg Burger" (the inventory items logged as produced in the same batch)
+        madeFor: sql<string>`coalesce((select string_agg(sm.qty || ' × ' || sm.product_name, ', ') from stock_movements sm where sm.ref = ${batches.name} and sm.created_at = ${batches.createdAt} and sm.type in ('added', 'initial')), '')`,
         note: M.note,
         createdAt: M.createdAt,
       })
@@ -1735,6 +1738,8 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         return L.openMessage(tx, a);
       case "loyalty.msg.retry":
         return L.retryMessage(tx, a);
+      case "loyalty.welcome":
+        return L.welcomeMessage(tx, a, role);
     }
     throw new ApiError(`Unknown action: ${op}`);
   }
