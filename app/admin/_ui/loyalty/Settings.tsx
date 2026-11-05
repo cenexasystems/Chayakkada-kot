@@ -166,9 +166,8 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
         <Line>
           If the points come to a part (like 12.5), they are
           <select className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[13.5px] font-semibold text-slate-800 outline-none focus:border-slate-400" value={c.earn.rounding} onChange={(e) => set("earn", { rounding: e.target.value as LoyaltyConfig["earn"]["rounding"] })} aria-label="Rounding of points">
-            <option value="floor">rounded down (12)</option>
-            <option value="round">rounded to the nearest (13)</option>
-            <option value="ceil">rounded up (13)</option>
+            <option value="floor">rounded down — 12.5 becomes 12</option>
+            <option value="ceil">rounded up — 12.5 becomes 13</option>
           </select>
         </Line>
 

@@ -253,7 +253,8 @@ export function sanitizeConfig(raw: unknown): LoyaltyConfig {
       fixedPerBill: 0, // the simple programme has one rule: points for every ₹100
       minBill: n(e.minBill, 0, 1_000_000, D.earn.minBill),
       maxPerBill: 0,
-      rounding: e.rounding === "round" || e.rounding === "ceil" || e.rounding === "floor" ? e.rounding : D.earn.rounding,
+      // two choices only: part-points are rounded down (12.5 → 12) or up (12.5 → 13); an older "nearest" setting becomes round down
+      rounding: e.rounding === "ceil" ? "ceil" : "floor",
       firstPurchaseBonus: 0,
       excludedProductIds: e.excludedProductIds === undefined ? D.earn.excludedProductIds : strs(e.excludedProductIds),
       excludedCategories: e.excludedCategories === undefined ? D.earn.excludedCategories : strs(e.excludedCategories),
