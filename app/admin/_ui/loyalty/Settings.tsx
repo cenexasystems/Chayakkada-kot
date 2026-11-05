@@ -68,6 +68,7 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
   const [tryBill, setTryBill] = useState("300");
   const [busy, setBusy] = useState(false);
   const dirty = JSON.stringify(c) !== JSON.stringify(saved);
+  const own = s.products.filter((p) => p.loyaltyPoints !== null && p.loyaltyPoints !== undefined).length;
   const cats = [...new Set(s.products.map((p) => p.category))].sort();
 
   const set = <K extends keyof LoyaltyConfig>(k: K, patch: Partial<LoyaltyConfig[K]>) => setC((x) => ({ ...x, [k]: { ...(x[k] as object), ...patch } as LoyaltyConfig[K] }));
@@ -154,6 +155,9 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
           points for every ₹100 they spend.
         </Line>
         <p className={cx(note, "mb-3 ml-1")}>&ldquo;Spend&rdquo; means the bill amount after discounts — GST and extra charges are not counted. Free gifts, and the part paid with points, never earn points.</p>
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50/70 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-amber-900">
+          <b>Items with their own points.</b> In Inventory you can give an item a fixed number of points (the &ldquo;Loyalty points per item&rdquo; box on the product). {own} of your {s.products.length} items have one. Those items earn <b>exactly that many points each</b> — this ₹100 rule is not used for them, and a discount on the bill does not reduce them. Every other item follows the rule above. The points of all items on a bill are added together.
+        </div>
         <Line>
           Bills smaller than ₹
           <NumBox value={c.earn.minBill} onChange={(n) => set("earn", { minBill: n })} />
