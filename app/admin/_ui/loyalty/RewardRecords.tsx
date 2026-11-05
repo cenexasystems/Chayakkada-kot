@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { LoyaltyState } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
 import { Badge, Btn, Empty, SearchBox, downloadExcel, fmtDate, cx } from "../kit";
-import { Pager, th, td, tableWrap, usePaged } from "./shared";
+import { Pager, th, td, tableWrap, usePaged, within, type PeriodData } from "./shared";
 
 type Row = { key: string; at: number; who: string; phone: string; reward: string; how: "Points" | "Spending" | "Bill offer" | "Other"; status: "Unlocked" | "Claimed" | "Cancelled" | "Expired"; invoice: string; points: number; claimedAt: number | null };
 
@@ -13,7 +13,7 @@ const TONE = { Unlocked: "green", Claimed: "slate", Cancelled: "red", Expired: "
 
 /* Rewards earned: every free gift a customer has unlocked or been given — from points, from spending, and from bill
    offers — with whether it is still waiting, or was claimed, and on which bill. */
-export default function RewardRecords({ d }: { d: LoyaltyState }) {
+export default function RewardRecords({ d, pd }: { d: LoyaltyState; pd: PeriodData }) {
   const { s } = useAdmin();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
@@ -41,8 +41,8 @@ export default function RewardRecords({ d }: { d: LoyaltyState }) {
         out.push({ key: `${b.id}:${k}`, at: b.createdAt, who: b.customerName && b.customerName !== "Walk-in customer" ? b.customerName : "Walk-in customer", phone: b.customerPhone, reward: `${i.qty} × ${i.name}${i.gift ? ` — ${i.gift}` : ""}`, how: "Bill offer", status: "Claimed", invoice: b.invoiceNo, points: 0, claimedAt: b.createdAt });
       }
     }
-    return out.sort((a, b) => b.at - a.at);
-  }, [d.customers, d.vouchers, s.bills]);
+    return out.filter((r) => within(r.at, pd.range)).sort((a, b) => b.at - a.at);
+  }, [d.customers, d.vouchers, s.bills, pd.range]);
 
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -53,6 +53,7 @@ export default function RewardRecords({ d }: { d: LoyaltyState }) {
 
   const exportRows = () =>
     downloadExcel(`rewards-earned-${new Date().toISOString().slice(0, 10)}`, [
+      ["Period", pd.label],
       ["Date earned", "Customer", "Mobile", "Reward / gift", "How earned", "Status", "Claimed on", "Bill", "Points used"],
       ...shown.map((r) => [fmtDate(r.at), r.who, r.phone, r.reward, r.how, r.status, r.claimedAt ? fmtDate(r.claimedAt) : "", r.invoice, r.points]),
     ]);

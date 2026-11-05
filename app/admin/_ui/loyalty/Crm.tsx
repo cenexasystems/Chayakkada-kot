@@ -8,7 +8,7 @@ import type { LoyaltyState } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
 import { waLink } from "../receipt";
 import { Badge, Btn, Empty, SearchBox, WaIcon, cx, downloadExcel, fmtDate, inputLineCls } from "../kit";
-import { Pager, th, td, tableWrap, usePaged } from "./shared";
+import { Pager, th, td, tableWrap, usePaged, within, type PeriodData } from "./shared";
 
 const NONE: PurchaseStats = { orders: 0, visits: 0, spent: 0, aov: 0, first: null, last: null, recentVisits: 0 };
 
@@ -28,7 +28,7 @@ const WORDS: Record<Segment | "all", string> = {
 /* Customer CRM: who your customers are, from their paid bills. Each loyalty customer falls into one group (new, regular,
    frequent, big spender, VIP, or slipping away); the thresholds are set in Settings. One tap opens WhatsApp with a message
    for the group — only for customers who agreed to WhatsApp messages. */
-export default function Crm({ d }: { d: LoyaltyState }) {
+export default function Crm({ d, pd }: { d: LoyaltyState; pd: PeriodData }) {
   const { s, now } = useAdmin();
   const cfg = d.config;
   const [q, setQ] = useState("");
@@ -39,10 +39,14 @@ export default function Crm({ d }: { d: LoyaltyState }) {
     const by = new Map<string, typeof s.bills>();
     for (const b of s.bills) if (b.customerPhone) by.set(b.customerPhone, [...(by.get(b.customerPhone) ?? []), b]);
     return d.customers.map((c) => {
-      const st = by.has(c.phone) ? statsFrom(by.get(c.phone)!, cfg.crm.frequentDays, now) : NONE;
-      return { c, st, seg: segmentOf(st, cfg, c.tier, now) };
+      const all = by.get(c.phone) ?? [];
+      const full = all.length ? statsFrom(all, cfg.crm.frequentDays, now) : NONE;
+      // the group comes from the whole history; the numbers shown are for the chosen period
+      const inP = all.filter((b) => within(b.createdAt, pd.range));
+      const st = pd.range ? (inP.length ? statsFrom(inP, cfg.crm.frequentDays, now) : NONE) : full;
+      return { c, st, seg: segmentOf(full, cfg, c.tier, now) };
     });
-  }, [d.customers, s.bills, cfg, now]);
+  }, [d.customers, s.bills, cfg, now, pd.range]);
 
   const counts = useMemo(() => {
     const m = new Map<Segment | "none", number>();
@@ -61,6 +65,7 @@ export default function Crm({ d }: { d: LoyaltyState }) {
 
   const exportRows = () =>
     downloadExcel(`customer-crm-${new Date().toISOString().slice(0, 10)}`, [
+      ["Period", pd.label],
       ["Customer", "Mobile", "Group", "Orders", "Visits", "Spent", "Average bill", "Last visit", "Points", "WhatsApp OK"],
       ...shown.map((r) => [r.c.name, r.c.phone, SEGMENTS.find((x) => x.key === r.seg)?.label ?? "No bills yet", r.st.orders, r.st.visits, r.st.spent, r.st.aov, r.st.last ? fmtDate(r.st.last) : "", r.c.available, r.c.consent ? "Yes" : "No"]),
     ]);

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { LoyaltyState } from "@/lib/loyalty/types";
+import type { LedgerEntry, LoyaltyState } from "@/lib/loyalty/types";
+import type { Range } from "@/lib/analytics";
 import { useAdmin } from "../Store";
 import { cx } from "../kit";
 
@@ -94,3 +95,12 @@ export function Stat({ label, value, hint, tone, note }: { label: string; value:
 export const th = "px-3 py-2.5 text-left text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500";
 export const td = "px-3 py-2.5 text-[13px] text-slate-700";
 export const tableWrap = "adm-scroll overflow-x-auto rounded-2xl border border-slate-100";
+
+/** Ledger types that are points earned, and those that are points used. */
+export const EARN_TYPES = ["purchase", "bonus", "promo", "referral", "occasion"];
+export const USE_TYPES = ["redemption", "reward"];
+
+/** What the period filter hands to every Loyalty tab: the chosen range (null = all time), a label, and the points
+    transactions inside it. */
+export type PeriodData = { range: Range; label: string; ledger: LedgerEntry[] };
+export const within = (t: number, r: Range) => !r || (t >= r.from && t <= r.to);

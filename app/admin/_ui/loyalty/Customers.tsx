@@ -8,13 +8,13 @@ import type { LedgerEntry, LoyaltyCustomer, LoyaltyMessage, LoyaltyState } from 
 import { useAdmin } from "../Store";
 import { Badge, Btn, Empty, Field, Modal, SearchBox, cx, downloadExcel, fmtDate, fmtDateTime, inputLineCls } from "../kit";
 import { MSG_LABEL, MessageList, MessageModal } from "./notify";
-import { LEDGER_LABEL, Pager, Stat, th, td, tableWrap, usePaged } from "./shared";
+import { EARN_TYPES, LEDGER_LABEL, Pager, Stat, USE_TYPES, th, td, tableWrap, usePaged, within, type PeriodData } from "./shared";
 
 const sel = "h-10 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700 outline-none focus:border-slate-400";
 
 /* Customers: register, find, edit and look at everything about one customer. Deliberately plain — points, rewards,
    purchases and WhatsApp messages for each person, nothing else. */
-export default function Customers({ d, reload }: { d: LoyaltyState; reload: () => void }) {
+export default function Customers({ d, pd, reload }: { d: LoyaltyState; pd: PeriodData; reload: () => void }) {
   const { s } = useAdmin();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
@@ -26,12 +26,36 @@ export default function Customers({ d, reload }: { d: LoyaltyState; reload: () =
     return d.customers.filter((c) => (!t || c.name.toLowerCase().includes(t) || c.phone.includes(t) || c.whatsapp.includes(t)) && (!status || c.status === status));
   }, [d.customers, q, status]);
   const pg = usePaged(rows, 25);
+  /* with a period chosen, the Earned / Redeemed / Purchases columns show only that time */
+  const per = useMemo(() => {
+    const m = new Map<string, { earned: number; redeemed: number; spent: number }>();
+    const get = (id: string) => m.get(id) ?? { earned: 0, redeemed: 0, spent: 0 };
+    for (const e of pd.ledger) {
+      const x = get(e.customerId);
+      if (EARN_TYPES.includes(e.type)) x.earned += e.points;
+      else if (USE_TYPES.includes(e.type)) x.redeemed += -e.points;
+      m.set(e.customerId, x);
+    }
+    const byPhone = new Map(d.customers.map((c) => [c.phone, c.id]));
+    for (const b of s.bills) {
+      const id = byPhone.get(b.customerPhone);
+      if (!id || b.status !== "completed" || !within(b.createdAt, pd.range)) continue;
+      const x = get(id);
+      x.spent += Math.max(0, b.subtotal - b.discount);
+      m.set(id, x);
+    }
+    return m;
+  }, [pd.ledger, pd.range, d.customers, s.bills]);
+  const earnedOf = (c: LoyaltyCustomer) => (pd.range ? per.get(c.id)?.earned ?? 0 : c.lifetime);
+  const redeemedOf = (c: LoyaltyCustomer) => (pd.range ? per.get(c.id)?.redeemed ?? 0 : c.redeemed);
+  const spentOf = (c: LoyaltyCustomer) => (pd.range ? per.get(c.id)?.spent ?? 0 : d.spend[c.id] ?? 0);
   const current = open ? d.customers.find((c) => c.id === open) ?? null : null;
 
   const exportRows = () =>
     downloadExcel(`loyalty-customers-${new Date().toISOString().slice(0, 10)}`, [
+      ["Period", pd.label],
       ["Name", "Mobile", "WhatsApp number", "WhatsApp OK", "Status", "Available points", "Points earned", "Points redeemed", "Total purchases", "Joined"],
-      ...rows.map((c) => [c.name, c.phone, c.whatsapp || c.phone, c.consent ? "Yes" : "No", c.status === "active" ? "Active" : "Deactivated", c.available, c.lifetime, c.redeemed, d.spend[c.id] ?? 0, fmtDate(c.createdAt)]),
+      ...rows.map((c) => [c.name, c.phone, c.whatsapp || c.phone, c.consent ? "Yes" : "No", c.status === "active" ? "Active" : "Deactivated", c.available, earnedOf(c), redeemedOf(c), spentOf(c), fmtDate(c.createdAt)]),
     ]);
 
   return (
@@ -79,9 +103,9 @@ export default function Customers({ d, reload }: { d: LoyaltyState; reload: () =
                     </td>
                     <td className={td}>{c.phone}</td>
                     <td className={cx(td, "adm-num text-right font-bold text-slate-900")}>{c.available}</td>
-                    <td className={cx(td, "adm-num text-right")}>{c.lifetime}</td>
-                    <td className={cx(td, "adm-num text-right")}>{c.redeemed}</td>
-                    <td className={cx(td, "adm-num text-right")}>{rupee(d.spend[c.id] ?? 0)}</td>
+                    <td className={cx(td, "adm-num text-right")}>{earnedOf(c)}</td>
+                    <td className={cx(td, "adm-num text-right")}>{redeemedOf(c)}</td>
+                    <td className={cx(td, "adm-num text-right")}>{rupee(spentOf(c))}</td>
                     <td className={td}>{fmtDate(c.createdAt)}</td>
                   </tr>
                 ))}

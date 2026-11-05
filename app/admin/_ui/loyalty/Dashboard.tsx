@@ -2,31 +2,34 @@
 
 import { useMemo, useState } from "react";
 import { rupee } from "@/lib/money";
-import { pointsValue, shopDate } from "@/lib/loyalty/engine";
+import { pointsValue } from "@/lib/loyalty/engine";
 import type { LoyaltyState } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
 import { Btn, Card, cx, downloadExcel, fmtDate, fmtDateTime } from "../kit";
-import { Stat } from "./shared";
 import { MSG_LABEL } from "./notify";
-import { LEDGER_LABEL } from "./shared";
+import { EARN_TYPES, LEDGER_LABEL, Stat, USE_TYPES, within, type PeriodData } from "./shared";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const monthLabel = (m: string) => `${MONTHS[Number(m.slice(5)) - 1]} ${m.slice(2, 4)}`;
 
 /** A plain overview of the loyalty programme: this month, the last six months of points, who the best customers are,
     the free gifts given, and what still needs doing (messages to send, points about to expire). */
-export default function Dashboard({ d, onOpen }: { d: LoyaltyState; onOpen: (tab: "customers" | "rewards") => void }) {
-  const { s, now } = useAdmin();
+export default function Dashboard({ d, pd, onOpen }: { d: LoyaltyState; pd: PeriodData; onOpen: (tab: "customers" | "rewards") => void }) {
+  const { s } = useAdmin();
   const cfg = d.config;
-  const thisMonth = shopDate(now).slice(0, 7);
+  const range = pd.range;
 
   const x = useMemo(() => {
     const nameOf = new Map(d.customers.map((c) => [c.phone, c.name]));
-    // free gifts from paid bills
+    // free gifts from paid bills in the period
     const gifts: { at: number; invoice: string; item: string; qty: number; who: string }[] = [];
     const byItem = new Map<string, number>();
+    const spendBy = new Map<string, number>();
+    const idOf = new Map(d.customers.map((c) => [c.phone, c.id]));
     for (const b of s.bills) {
-      if (b.status !== "completed") continue;
+      if (b.status !== "completed" || !within(b.createdAt, range)) continue;
+      const cid = idOf.get(b.customerPhone);
+      if (cid) spendBy.set(cid, (spendBy.get(cid) ?? 0) + Math.max(0, b.subtotal - b.discount));
       for (const i of b.items) {
         if (!i.free) continue;
         gifts.push({ at: b.createdAt, invoice: b.invoiceNo, item: i.name, qty: i.qty, who: nameOf.get(b.customerPhone) ?? (b.customerName && b.customerName !== "Walk-in customer" ? b.customerName : "Walk-in") });
@@ -34,17 +37,27 @@ export default function Dashboard({ d, onOpen }: { d: LoyaltyState; onOpen: (tab
       }
     }
     gifts.sort((a, b) => b.at - a.at);
-    const monthGifts = gifts.filter((g) => shopDate(g.at).startsWith(thisMonth)).reduce((a, g) => a + g.qty, 0);
-    const byPoints = [...d.customers].sort((a, b) => b.available - a.available).slice(0, 5);
-    const bySpend = [...d.customers].sort((a, b) => (d.spend[b.id] ?? 0) - (d.spend[a.id] ?? 0)).slice(0, 5);
-    const months = d.months.slice(-6);
-    const m = d.months.find((r) => r.month === thisMonth) ?? { earned: 0, redeemed: 0 };
-    const newThisMonth = d.customers.filter((c) => shopDate(c.createdAt).startsWith(thisMonth)).length;
+    const periodGifts = gifts.reduce((a, g) => a + g.qty, 0);
+    // points earned / redeemed in the period, in total and per customer
+    const earnedBy = new Map<string, number>();
+    let earned = 0;
+    let redeemed = 0;
+    for (const e of pd.ledger) {
+      if (EARN_TYPES.includes(e.type)) {
+        earned += e.points;
+        earnedBy.set(e.customerId, (earnedBy.get(e.customerId) ?? 0) + e.points);
+      } else if (USE_TYPES.includes(e.type)) redeemed += -e.points;
+    }
+    const byPoints = (range ? [...d.customers].sort((a, b) => (earnedBy.get(b.id) ?? 0) - (earnedBy.get(a.id) ?? 0)) : [...d.customers].sort((a, b) => b.available - a.available)).slice(0, 5).map((c) => ({ c, value: range ? `${earnedBy.get(c.id) ?? 0} pts earned` : `${c.available} pts` }));
+    const bySpend = [...d.customers].sort((a, b) => (spendBy.get(b.id) ?? 0) - (spendBy.get(a.id) ?? 0)).slice(0, 5).map((c) => ({ c, value: spendBy.get(c.id) ?? 0 }));
+    const months = (range ? d.months.filter((r) => within(new Date(`${r.month}-15T00:00:00`).getTime(), range) || within(new Date(`${r.month}-01T00:00:00`).getTime(), range)) : d.months).slice(-6);
+    const newInPeriod = d.customers.filter((c) => within(c.createdAt, range)).length;
     const waiting = d.vouchers.filter((v) => v.status === "issued" && v.kind === "free_item").length;
-    const msg = { pending: d.messages.filter((r) => r.status === "pending").length, opened: d.messages.filter((r) => r.status === "opened").length, failed: d.messages.filter((r) => r.status === "failed").length };
+    const inMsgs = d.messages.filter((r) => within(r.createdAt, range));
+    const msg = { pending: inMsgs.filter((r) => r.status === "pending").length, opened: inMsgs.filter((r) => r.status === "opened").length, failed: inMsgs.filter((r) => r.status === "failed").length, list: inMsgs };
     const expiring = Object.entries(d.expiring).map(([id, v]) => ({ c: d.customers.find((c) => c.id === id), ...v })).filter((r) => r.c);
-    return { gifts, byItem: [...byItem].sort((a, b) => b[1] - a[1]).slice(0, 5), monthGifts, byPoints, bySpend, months, m, newThisMonth, waiting, msg, expiring };
-  }, [d, s.bills, thisMonth]);
+    return { gifts, byItem: [...byItem].sort((a, b) => b[1] - a[1]).slice(0, 5), periodGifts, byPoints, bySpend, months, earned, redeemed, newInPeriod, waiting, msg, expiring };
+  }, [d, s.bills, pd.ledger, range]);
 
   const [busy, setBusy] = useState(false);
   const day = new Date().toISOString().slice(0, 10);
@@ -56,37 +69,33 @@ export default function Dashboard({ d, onOpen }: { d: LoyaltyState; onOpen: (tab
       {
         name: "Summary",
         rows: [
+          ["Period", pd.label],
           ["Loyalty customers", d.customers.length],
-          ["Points earned (all time)", d.totals.earned],
-          ["Points redeemed (all time)", d.totals.redeemed],
+          ["Points earned", x.earned],
+          ["Points redeemed", x.redeemed],
           ["Available points", d.totals.outstanding],
           ["Value of available points (₹)", liability],
-          ["Free gifts given", d.totals.giftsGiven],
+          ["Free gifts given", x.periodGifts],
           ["Unlocked gifts waiting", x.waiting],
-          ["New customers this month", x.newThisMonth],
-          ["Points earned this month", x.m.earned],
-          ["Points redeemed this month", x.m.redeemed],
-          ["Free gifts this month", x.monthGifts],
+          ["New customers", x.newInPeriod],
           ["WhatsApp messages ready to send", x.msg.pending],
           ["WhatsApp messages opened", x.msg.opened],
           ["WhatsApp messages failed", x.msg.failed],
         ],
       },
-      { name: "Points by month", rows: [["Month", "Earned", "Redeemed"], ...d.months.map((r) => [r.month, r.earned, r.redeemed])] },
+      { name: "Points by month", rows: [["Month", "Earned", "Redeemed"], ...x.months.map((r) => [r.month, r.earned, r.redeemed])] },
       { name: "Customers", rows: [["Customer", "Mobile", "Available points", "Points earned", "Points redeemed", "Total purchases (₹)"], ...d.customers.map((c) => [c.name, c.phone, c.available, c.lifetime, c.redeemed, d.spend[c.id] ?? 0])] },
       { name: "Free gifts given", rows: [["Date", "Bill", "Gift", "Quantity", "Given to"], ...x.gifts.map((g) => [fmtDate(g.at), g.invoice, g.item, g.qty, g.who])] },
       { name: "Points about to expire", rows: [["Customer", "Points", "Expire on"], ...x.expiring.map((r) => [r.c!.name, r.points, fmtDate(r.expiresAt)])] },
-      { name: "WhatsApp messages", rows: [["When", "Customer", "Message", "Status", "Times opened", "Text"], ...d.messages.map((m) => [fmtDateTime(m.createdAt), nameOf(m.customerId), MSG_LABEL[m.type] ?? m.type, m.status === "opened" ? "Opened in WhatsApp" : m.status === "failed" ? "Failed" : "Ready to send", m.opens, m.text])] },
+      { name: "WhatsApp messages", rows: [["When", "Customer", "Message", "Status", "Times opened", "Text"], ...x.msg.list.map((m) => [fmtDateTime(m.createdAt), nameOf(m.customerId), MSG_LABEL[m.type] ?? m.type, m.status === "opened" ? "Opened in WhatsApp" : m.status === "failed" ? "Failed" : "Ready to send", m.opens, m.text])] },
     ]);
 
   /* every points transaction of every customer */
   const exportLedger = async () => {
     setBusy(true);
     try {
-      const r = await fetch("/api/admin/loyalty/ledger?size=5000", { cache: "no-store" });
-      const j = await r.json();
-      const rows = (j.rows ?? []) as { createdAt: number; customerId: string; type: string; balanceBefore: number; points: number; balanceAfter: number; invoiceNo: string | null; description: string; actor: string }[];
-      downloadExcel(`points-transactions-${day}`, [{ name: "Points transactions", rows: [["When", "Customer", "Type", "Points before", "Change", "Points after", "Bill", "Note", "By"], ...rows.map((e) => [fmtDateTime(e.createdAt), nameOf(e.customerId), LEDGER_LABEL[e.type] ?? e.type, e.balanceBefore, e.points, e.balanceAfter, e.invoiceNo ?? "", e.description, e.actor])] }]);
+      const rows = pd.ledger as unknown as { createdAt: number; customerId: string; type: string; balanceBefore: number; points: number; balanceAfter: number; invoiceNo: string | null; description: string; actor: string }[];
+      downloadExcel(`points-transactions-${day}`, [{ name: "Points transactions", rows: [["Period", pd.label], ["When", "Customer", "Type", "Points before", "Change", "Points after", "Bill", "Note", "By"], ...rows.map((e) => [fmtDateTime(e.createdAt), nameOf(e.customerId), LEDGER_LABEL[e.type] ?? e.type, e.balanceBefore, e.points, e.balanceAfter, e.invoiceNo ?? "", e.description, e.actor])] }]);
     } finally {
       setBusy(false);
     }
@@ -106,14 +115,14 @@ export default function Dashboard({ d, onOpen }: { d: LoyaltyState; onOpen: (tab
         </Btn>
       </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="New customers this month" value={x.newThisMonth} />
-        <Stat label="Points earned this month" value={x.m.earned.toLocaleString("en-IN")} tone="green" />
-        <Stat label="Points redeemed this month" value={x.m.redeemed.toLocaleString("en-IN")} tone="red" />
-        <Stat label="Free gifts this month" value={x.monthGifts} hint={`${x.waiting} unlocked, waiting to be claimed`} />
+        <Stat label="New customers" value={x.newInPeriod} hint={pd.label} />
+        <Stat label="Points earned" value={x.earned.toLocaleString("en-IN")} tone="green" hint={pd.label} />
+        <Stat label="Points redeemed" value={x.redeemed.toLocaleString("en-IN")} tone="red" hint={pd.label} />
+        <Stat label="Free gifts given" value={x.periodGifts} hint={`${pd.label} · ${x.waiting} unlocked, waiting`} />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-        <Card title="Points, last 6 months">
+        <Card title={range ? `Points by month · ${pd.label}` : "Points, last 6 months"}>
           {!x.months.length ? (
             <p className="py-8 text-center text-[13px] text-slate-400">Points will appear here after the first loyalty bill.</p>
           ) : (
@@ -159,11 +168,11 @@ export default function Dashboard({ d, onOpen }: { d: LoyaltyState; onOpen: (tab
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <Card title="Top customers by points">
-          <Ranked rows={x.byPoints.map((c) => ({ key: c.id, name: c.name, sub: c.phone, value: `${c.available} pts` }))} />
+        <Card title={range ? "Most points earned" : "Top customers by points"}>
+          <Ranked rows={x.byPoints.map(({ c, value }) => ({ key: c.id, name: c.name, sub: c.phone, value }))} />
         </Card>
         <Card title="Top customers by spending">
-          <Ranked rows={x.bySpend.map((c) => ({ key: c.id, name: c.name, sub: c.phone, value: rupee(d.spend[c.id] ?? 0) }))} />
+          <Ranked rows={x.bySpend.map(({ c, value }) => ({ key: c.id, name: c.name, sub: c.phone, value: rupee(value) }))} />
         </Card>
       </div>
 
@@ -174,7 +183,7 @@ export default function Dashboard({ d, onOpen }: { d: LoyaltyState; onOpen: (tab
           ) : (
             <>
               <p className="mb-2 text-[12.5px] text-slate-600">
-                <b>{d.totals.giftsGiven}</b> in total{x.byItem.length ? ` · most given: ${x.byItem.map(([n, q]) => `${n} (${q})`).join(", ")}` : ""}
+                <b>{x.periodGifts}</b> in total{x.byItem.length ? ` · most given: ${x.byItem.map(([n, q]) => `${n} (${q})`).join(", ")}` : ""}
               </p>
               <ul className="divide-y divide-slate-100">
                 {x.gifts.slice(0, 6).map((g, i) => (
@@ -204,11 +213,11 @@ export default function Dashboard({ d, onOpen }: { d: LoyaltyState; onOpen: (tab
       </div>
 
       <Card title="Latest WhatsApp messages">
-        {!d.messages.length ? (
+        {!x.msg.list.length ? (
           <p className="py-6 text-center text-[13px] text-slate-400">No messages yet.</p>
         ) : (
           <ul className="divide-y divide-slate-100">
-            {d.messages.slice(0, 6).map((m) => (
+            {x.msg.list.slice(0, 6).map((m) => (
               <li key={m.id} className="flex items-center justify-between gap-3 py-2 text-[13px]">
                 <span className="min-w-0 truncate">
                   <b>{MSG_LABEL[m.type] ?? m.type}</b> <span className="text-slate-500">· {d.customers.find((c) => c.id === m.customerId)?.name ?? "customer"}</span>
