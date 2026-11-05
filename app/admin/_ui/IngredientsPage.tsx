@@ -363,7 +363,7 @@ function BatchModal({ ingredients: ings, products, recipes, onClose }: { ingredi
       }
     >
       <div className="space-y-4">
-        {recipes.length > 0 && (
+        {(
           <Field label="Repeat a saved recipe" hint="Picking one fills the rows below and names the batch — still editable before you log it.">
             <div className="relative" ref={recipeBoxRef}>
               <div className="flex h-10 w-full items-center rounded-xl border border-slate-300 bg-white pr-1 text-left text-[14px] outline-none transition focus-within:border-slate-500 hover:border-slate-400">
@@ -400,6 +400,7 @@ function BatchModal({ ingredients: ings, products, recipes, onClose }: { ingredi
               </div>
               {recipeOpen && (
                 <div role="listbox" className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-[0_10px_24px_-10px_rgba(15,23,42,.25)]">
+                    {recipes.length === 0 && <p className="px-3 py-3 text-[13px] text-slate-500">No saved recipes yet — tick &ldquo;Save as a recipe for next time&rdquo; when you log a batch.</p>}
                     {recipes.map((r) => (
                       <div key={r.id} className={cx("flex items-center gap-1 px-1", r.id === recipeId && "bg-slate-50")}>
                         <button
@@ -431,7 +432,7 @@ function BatchModal({ ingredients: ings, products, recipes, onClose }: { ingredi
           </Field>
         )}
         <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
-          <Field label="Batch name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Burger patties × 2" maxLength={120} autoFocus /></Field>
+          <Field label="Batch name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Chocolate cake × 2" maxLength={120} autoFocus /></Field>
           <Field label="Note (optional)"><input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Any details to remember" maxLength={300} /></Field>
         </div>
         <div className="space-y-2 rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
@@ -533,7 +534,7 @@ export default function IngredientsPage() {
             <Link href="/admin/inventory/ingredient-moves" className="inline-flex h-9 items-center gap-2 rounded-xl bg-slate-100 px-3.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-200">
               <Icon name="list" size={16} /> Movements log
             </Link>
-            <Btn kind="soft" icon="download" disabled={!ings.length} onClick={() => downloadExcel(`ingredients-new Date().toISOString().slice(0, 10).xlsx`, [{ name: "Ingredients", rows: [["Ingredient", "Unit", "In stock", "Low-stock warning", "Cost per unit", "Stock value", "Status"], ...ings.filter((i) => i.active).map((i) => [i.name, i.unit, i.stock, i.lowAt, i.costPerUnit, Math.round(i.stock * i.costPerUnit * 100) / 100, i.stock <= 0 ? "Out" : i.lowAt > 0 && i.stock <= i.lowAt ? "Low" : "OK"])] }])}>Excel</Btn>
+            <Btn kind="soft" icon="download" disabled={!ings.length} onClick={() => downloadExcel(`ingredients-${new Date().toISOString().slice(0, 10)}.xlsx`, [{ name: "Ingredients", rows: [["Ingredient", "Unit", "In stock", "Low-stock warning", "Cost per unit", "Stock value", "Status"], ...ings.filter((i) => i.active).map((i) => [i.name, i.unit, i.stock, i.lowAt, i.costPerUnit, Math.round(i.stock * i.costPerUnit * 100) / 100, i.stock <= 0 ? "Out" : i.lowAt > 0 && i.stock <= i.lowAt ? "Low" : "OK"])] }])}>Excel</Btn>
             <Btn kind="soft" icon="plus" onClick={() => setEdit(EMPTY_ING)}>New ingredient</Btn>
             <Btn kind="dark" icon="orders" onClick={() => setBatchOpen(true)} disabled={active.length === 0} title={active.length === 0 ? "Add an ingredient first" : "Log a batch"}>Log a batch</Btn>
           </>

@@ -166,7 +166,7 @@ html:has(.adm) {
   color: var(--cream);
 }
 .adm-link.is-on {
-  background: linear-gradient(135deg, var(--cherry), #f05a20);
+  background: var(--cherry);
   color: #fff;
   box-shadow: 0 8px 16px -10px rgba(107, 117, 80, 0.9);
 }
