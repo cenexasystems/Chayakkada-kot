@@ -1,12 +1,46 @@
 "use client";
 
 import { useState } from "react";
-import { rupee } from "@/lib/money";
-import { DEFAULT_CONFIG, MESSAGE_FIELDS, MESSAGE_META, rangeWarnings, type LoyaltyConfig, type MessageKey, type RedeemRange } from "@/lib/loyalty/config";
+import { round2 } from "@/lib/money";
+import { redeemRange } from "@/lib/loyalty/engine";
+import { DEFAULT_CONFIG, MESSAGE_FIELDS, MESSAGE_META, crmWarnings, rangeWarnings, type LoyaltyConfig, type MessageKey, type RedeemRange } from "@/lib/loyalty/config";
 import type { LoyaltyState } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
 import { Btn, Card, Field, Switch as RawSwitch, cx, downloadExcel, inputLineCls } from "../kit";
 import { ItemPickerModal } from "../ItemSelect";
+
+/** One sentence with boxes to fill in, e.g. "A customer earns [5] points for every ₹100". */
+function Line({ children }: { children: React.ReactNode }) {
+  return <div className="mb-2.5 flex flex-wrap items-center gap-x-2 gap-y-2 text-[13.5px] text-slate-800">{children}</div>;
+}
+
+/** A small number box that sits inside a sentence. */
+function NumBox({ value, onChange, step = 1 }: { value: number; onChange: (n: number) => void; step?: number }) {
+  return <input type="number" min={0} step={step} className="h-10 w-24 rounded-xl border border-slate-300 bg-white px-3 text-right text-[14px] font-bold text-slate-900 outline-none focus:border-slate-500 focus:ring-4 focus:ring-slate-100" value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))} />;
+}
+
+/** A worked example the owner can play with. */
+function TryIt({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-4 rounded-xl bg-emerald-50/70 px-3.5 py-3">
+      <b className="mb-1.5 block text-[12px] uppercase tracking-[0.1em] text-emerald-800">{title}</b>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2 text-[13.5px] text-slate-800">{children}</div>
+    </div>
+  );
+}
+
+/** A yes/no rule: the switch, what it is about, and in words what it does right now. */
+function Rule({ on, onChange, title }: { on: boolean; onChange: (v: boolean) => void; title: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
+      <span className="text-[13.5px] text-slate-800">{title}</span>
+      <span className="inline-flex items-center gap-2.5">
+        <b className={cx("text-[12.5px]", on ? "text-emerald-700" : "text-red-600")}>{on ? "Points allowed" : "Points NOT allowed"}</b>
+        <RawSwitch on={on} onChange={onChange} label={title} />
+      </span>
+    </div>
+  );
+}
 
 /** A switch with its words next to it (the kit switch only labels itself for screen readers). */
 function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
@@ -30,13 +64,23 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
   const { s, act } = useAdmin();
   const [c, setC] = useState<LoyaltyConfig>(saved);
   const [reason, setReason] = useState("");
+  const [tryEarn, setTryEarn] = useState("500");
+  const [tryBill, setTryBill] = useState("300");
   const [busy, setBusy] = useState(false);
   const dirty = JSON.stringify(c) !== JSON.stringify(saved);
   const cats = [...new Set(s.products.map((p) => p.category))].sort();
 
   const set = <K extends keyof LoyaltyConfig>(k: K, patch: Partial<LoyaltyConfig[K]>) => setC((x) => ({ ...x, [k]: { ...(x[k] as object), ...patch } as LoyaltyConfig[K] }));
-  const warnings = rangeWarnings(c.redeem.ranges);
-  const sample = c.redeem.ranges[0];
+  const warnings = rangeWarnings(c.redeem.ranges, c.redeem.pointValue);
+  const crmProblems = crmWarnings(c.crm);
+  // the worked examples use the same rules the server uses
+  const earnFor100 = (amount: number) => {
+    if (!(amount > 0) || amount < c.earn.minBill) return 0;
+    const raw = (amount / 100) * c.earn.per100 + 1e-9;
+    return c.earn.rounding === "ceil" ? Math.ceil(raw) : c.earn.rounding === "round" ? Math.round(raw) : Math.floor(raw);
+  };
+  const tryRange = redeemRange(Number(tryBill), c.redeem.ranges);
+  const tryMax = tryRange ? Math.min(tryRange.max, Math.floor(Number(tryBill) / c.redeem.pointValue + 1e-9)) : 0;
   const save = async () => {
     setBusy(true);
     await act("loyalty.config", { config: c, reason });
@@ -70,7 +114,6 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
           ["Restock free gifts when a bill is voided", yes(saved.gifts.restockOnVoid)],
           ["Unlocked reward valid for (days, 0 = never)", saved.gifts.validityDays],
           ["Points expire after (days, 0 = never)", saved.expiry.days],
-          ["Warn before expiry (days)", saved.expiry.warnDays],
           ["Loyalty summary on receipts", yes(saved.display.receiptSummary)],
           ["Consent box starts ticked", yes(saved.display.defaultConsent)],
           ["Tidy deleted bills automatically", yes(saved.display.autoTidy)],
@@ -87,7 +130,7 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
     <div className="space-y-5">
       {/* save bar */}
       <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
-        <Switch on={c.enabled} onChange={(v) => setC({ ...c, enabled: v })} label={c.enabled ? "Loyalty programme is on" : "Loyalty programme is off — nobody earns or uses points"} />
+        <Switch on={c.enabled} onChange={(v) => setC({ ...c, enabled: v })} label={c.enabled ? "Loyalty programme is on" : "Loyalty programme is OFF — no points, no loyalty gifts, no bill offers, no messages"} />
         <div className="flex flex-wrap items-center gap-2">
           <input className="h-10 w-64 rounded-xl border border-slate-200 bg-white px-3 text-[13px] outline-none focus:border-slate-400" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} placeholder="Reason for the change (audit log)" />
           <Btn icon="download" onClick={exportSettings}>
@@ -103,115 +146,137 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
       </div>
 
       {/* earning */}
-      <Card title="Earning points">
-        <p className={cx(note, "mb-4")}>Customers earn points on every <b>paid</b> bill. Points are worked out on the eligible bill amount after discounts — never on free gifts, never on the part paid with points, and never twice for the same bill.</p>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Points for every ₹100" hint="Default 5">
-            <input type="number" min={0} step={0.5} className={small} value={c.earn.per100} onChange={(e) => set("earn", { per100: Math.max(0, Number(e.target.value) || 0), mode: "per100" })} />
-          </Field>
-          <Field label="Value of 1 point (₹)" hint="Default ₹0.50">
-            <input type="number" min={0.01} step={0.05} className={small} value={c.redeem.pointValue} onChange={(e) => set("redeem", { pointValue: Math.max(0.01, Number(e.target.value) || 0.01) })} />
-          </Field>
-          <Field label="Smallest bill that earns points (₹)" hint="0 = every bill">
-            <input type="number" min={0} className={small} value={c.earn.minBill} onChange={(e) => set("earn", { minBill: Math.max(0, Number(e.target.value) || 0) })} />
-          </Field>
-          <Field label="Rounding of points" hint="A ₹250 bill is 12.5 points">
-            <select className={inputLineCls} value={c.earn.rounding} onChange={(e) => set("earn", { rounding: e.target.value as LoyaltyConfig["earn"]["rounding"] })}>
-              <option value="floor">Round down (12)</option>
-              <option value="round">Nearest (13)</option>
-              <option value="ceil">Round up (13)</option>
-            </select>
-          </Field>
+      <Card title="1 · Earning points">
+        <p className={cx(note, "mb-4")}>Every time a customer pays a bill, they collect points. Decide how many here.</p>
+        <Line>
+          A customer earns
+          <NumBox value={c.earn.per100} step={0.5} onChange={(n) => set("earn", { per100: n, mode: "per100" })} />
+          points for every ₹100 they spend.
+        </Line>
+        <p className={cx(note, "mb-3 ml-1")}>&ldquo;Spend&rdquo; means the bill amount after discounts — GST and extra charges are not counted. Free gifts, and the part paid with points, never earn points.</p>
+        <Line>
+          Bills smaller than ₹
+          <NumBox value={c.earn.minBill} onChange={(n) => set("earn", { minBill: n })} />
+          earn no points. <span className="text-slate-400">(0 means every bill earns)</span>
+        </Line>
+        <Line>
+          If the points come to a part (like 12.5), they are
+          <select className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[13.5px] font-semibold text-slate-800 outline-none focus:border-slate-400" value={c.earn.rounding} onChange={(e) => set("earn", { rounding: e.target.value as LoyaltyConfig["earn"]["rounding"] })} aria-label="Rounding of points">
+            <option value="floor">rounded down (12)</option>
+            <option value="round">rounded to the nearest (13)</option>
+            <option value="ceil">rounded up (13)</option>
+          </select>
+        </Line>
+
+        <div className="mt-4 rounded-xl border border-slate-100 p-3.5">
+          <b className="text-[13px] text-slate-900">Items that earn no points</b>
+          <p className={cx(note, "mb-2")}>Leave empty if everything earns points. Pick a whole category, or single items.</p>
+          <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">By category</span>
+          <Chips all={cats} picked={c.earn.excludedCategories} onChange={(v) => set("earn", { excludedCategories: v })} none="No category is excluded" />
+          <span className="mb-1 mt-3 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Single items</span>
+          <ItemPicker products={s.products} picked={c.earn.excludedProductIds} onChange={(v) => set("earn", { excludedProductIds: v })} none="No single item is excluded" />
         </div>
-        <div className="mt-4">
-          <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Categories that don&apos;t earn points</span>
-          <Chips all={cats} picked={c.earn.excludedCategories} onChange={(v) => set("earn", { excludedCategories: v })} none="Every category earns points" />
-        </div>
-        <div className="mt-4">
-          <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Items that don&apos;t earn points</span>
-          <ItemPicker products={s.products} picked={c.earn.excludedProductIds} onChange={(v) => set("earn", { excludedProductIds: v })} none="Every item earns points" />
-        </div>
-        <p className="mt-4 rounded-xl bg-slate-50 px-3.5 py-2.5 text-[13px] text-slate-700">
-          <b>In plain words:</b> {c.earn.per100} points for every ₹100 — a ₹500 bill earns {Math.floor((500 / 100) * c.earn.per100 + 1e-9)} points. 1 point is worth {rupee(c.redeem.pointValue)}, so those points are worth {rupee(Math.floor((500 / 100) * c.earn.per100 + 1e-9) * c.redeem.pointValue)}.
-        </p>
+
+        <TryIt title="Try it — how many points does a bill earn?">
+          A bill of ₹
+          <NumBox value={Number(tryEarn)} onChange={(n) => setTryEarn(String(n))} />
+          earns <b className="text-emerald-700">{earnFor100(Number(tryEarn))} points</b>
+          {earnFor100(Number(tryEarn)) > 0 && <>, worth ₹{round2(earnFor100(Number(tryEarn)) * c.redeem.pointValue)} when the customer uses them.</>}
+          {Number(tryEarn) > 0 && earnFor100(Number(tryEarn)) === 0 && <> — nothing, because the bill is smaller than ₹{c.earn.minBill}.</>}
+        </TryIt>
       </Card>
 
       {/* redeeming */}
-      <Card title="Using points on a bill" right={<Switch on={c.redeem.enabled} onChange={(v) => set("redeem", { enabled: v })} label={c.redeem.enabled ? "On" : "Off"} />}>
-        <p className={cx(note, "mb-4")}>How many points a customer may use depends on the size of the bill. Find the range the bill falls in: they must use at least the minimum and at most the maximum (and never more than they own, or more than the bill).</p>
-        <div className="overflow-x-auto rounded-xl border border-slate-100">
-          <table className="w-full min-w-[560px] text-[13px]">
-            <thead className="bg-slate-50 text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500">
-              <tr>
-                <th className="px-3 py-2 text-left">Bill from (₹)</th>
-                <th className="px-3 py-2 text-left">Up to (₹)</th>
-                <th className="px-3 py-2 text-left">Minimum points</th>
-                <th className="px-3 py-2 text-left">Maximum points</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {c.redeem.ranges.map((r, i) => (
-                <tr key={i}>
-                  <td className="px-3 py-2">
-                    <input type="number" min={0} className={small} value={r.from} onChange={(e) => setRange(i, { from: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input type="number" min={0} className={small} value={r.to ?? ""} placeholder="and above" onChange={(e) => setRange(i, { to: e.target.value === "" ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input type="number" min={1} className={small} value={r.min} onChange={(e) => setRange(i, { min: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input type="number" min={1} className={small} value={r.max} onChange={(e) => setRange(i, { max: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Btn size="sm" kind="warn" icon="trash" aria-label="Delete range" onClick={() => set("redeem", { ranges: c.redeem.ranges.filter((_, k) => k !== i) })} />
-                  </td>
+      <Card title="2 · Using points (redeeming)" right={<Switch on={c.redeem.enabled} onChange={(v) => set("redeem", { enabled: v })} label={c.redeem.enabled ? "Customers can use points" : "Using points is off"} />}>
+        <p className={cx(note, "mb-4")}>Customers can pay part of a bill with the points they have collected. Decide what a point is worth and how many they may use.</p>
+        <Line>
+          Each point is worth ₹
+          <NumBox value={c.redeem.pointValue} step={0.05} onChange={(n) => set("redeem", { pointValue: Math.max(0.01, n) })} />
+          <span className="text-slate-400">— so 100 points = ₹{round2(100 * c.redeem.pointValue)}</span>
+        </Line>
+
+        <div className="mt-4 rounded-xl border border-slate-100 p-3.5">
+          <b className="text-[13px] text-slate-900">How many points can be used on a bill?</b>
+          <p className={cx(note, "mb-3")}>It depends on how big the bill is. Each row says: <i>for a bill from ₹A up to ₹B, the customer must use at least X points and at most Y points.</i> A bill that falls in no row can&apos;t use points.</p>
+          <div className="overflow-x-auto rounded-xl border border-slate-100">
+            <table className="w-full min-w-[620px] text-[13px]">
+              <thead className="bg-slate-50 text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 text-left">Bill is from (₹)</th>
+                  <th className="px-3 py-2 text-left">…up to (₹)</th>
+                  <th className="px-3 py-2 text-left">Must use at least (points)</th>
+                  <th className="px-3 py-2 text-left">Can use at most (points)</th>
+                  <th className="px-3 py-2" />
                 </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {c.redeem.ranges.map((r, i) => (
+                  <tr key={i}>
+                    <td className="px-3 py-2">
+                      <input type="number" min={0} className={small} value={r.from} onChange={(e) => setRange(i, { from: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input type="number" min={0} className={small} value={r.to ?? ""} placeholder="and above" onChange={(e) => setRange(i, { to: e.target.value === "" ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input type="number" min={1} className={small} value={r.min} onChange={(e) => setRange(i, { min: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input type="number" min={1} className={small} value={r.max} onChange={(e) => setRange(i, { max: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Btn size="sm" kind="warn" icon="trash" aria-label="Delete range" onClick={() => set("redeem", { ranges: c.redeem.ranges.filter((_, k) => k !== i) })} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Btn size="sm" icon="plus" onClick={() => set("redeem", { ranges: [...c.redeem.ranges, { from: (c.redeem.ranges.at(-1)?.to ?? c.redeem.ranges.at(-1)?.from ?? 0) + 1, to: null, min: 20, max: 40 }] })}>
+              Add range
+            </Btn>
+            <Btn size="sm" onClick={() => set("redeem", { ranges: DEFAULT_CONFIG.redeem.ranges })}>
+              Use the suggested ranges
+            </Btn>
+          </div>
+          {warnings.length > 0 && (
+            <ul className="mt-3 space-y-1 rounded-xl bg-amber-50 px-3.5 py-2.5 text-[12.5px] font-semibold text-amber-800">
+              {warnings.map((w) => (
+                <li key={w}>⚠ {w}</li>
               ))}
-            </tbody>
-          </table>
+            </ul>
+          )}
+          <TryIt title="Try it — what can a customer use on a bill?">
+            A bill of ₹
+            <NumBox value={Number(tryBill)} onChange={(n) => setTryBill(String(n))} />
+            {tryRange ? (
+              <>
+                — the customer must use at least <b>{tryRange.min}</b> and at most <b>{tryMax}</b> points, which takes <b className="text-emerald-700">₹{round2(tryRange.min * c.redeem.pointValue)} to ₹{round2(tryMax * c.redeem.pointValue)}</b> off (and only if they own that many points).
+              </>
+            ) : (
+              <> — no row covers this amount, so <b className="text-red-600">points can&apos;t be used</b> on it.</>
+            )}
+          </TryIt>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Btn size="sm" icon="plus" onClick={() => set("redeem", { ranges: [...c.redeem.ranges, { from: (c.redeem.ranges.at(-1)?.to ?? c.redeem.ranges.at(-1)?.from ?? 0) + 1, to: null, min: 20, max: 40 }] })}>
-            Add range
-          </Btn>
-          <Btn size="sm" onClick={() => set("redeem", { ranges: DEFAULT_CONFIG.redeem.ranges })}>
-            Use the suggested ranges
-          </Btn>
+
+        <div className="mt-4 rounded-xl border border-slate-100 p-3.5">
+          <b className="text-[13px] text-slate-900">Can points be used on a bill that also has…</b>
+          <p className={cx(note, "mb-2")}>Switch off to stop customers combining points with another saving. If a bill has it, the points are not applied and Billing tells the cashier why.</p>
+          <div className="space-y-2.5">
+            <Rule on={c.redeem.withCoupon} onChange={(v) => set("redeem", { withCoupon: v })} title="a coupon discount" />
+            <Rule on={c.redeem.withManual} onChange={(v) => set("redeem", { withManual: v })} title="a manual discount typed at billing" />
+            <Rule on={c.redeem.withReward} onChange={(v) => set("redeem", { withReward: v })} title="a free-gift reward being claimed" />
+          </div>
         </div>
-        {warnings.length > 0 && (
-          <ul className="mt-3 space-y-1 rounded-xl bg-amber-50 px-3.5 py-2.5 text-[12.5px] font-semibold text-amber-800">
-            {warnings.map((w) => (
-              <li key={w}>⚠ {w}</li>
-            ))}
-          </ul>
-        )}
-        <p className="mt-3 rounded-xl bg-slate-50 px-3.5 py-2.5 text-[13px] text-slate-700">
-          <b>In plain words:</b>{" "}
-          {sample
-            ? `on a bill of ${rupee(sample.from)}${sample.to === null ? " or more" : ` to ${rupee(sample.to)}`}, a customer can use ${sample.min} to ${sample.max} points — that takes ${rupee(sample.min * c.redeem.pointValue)} to ${rupee(sample.max * c.redeem.pointValue)} off.`
-            : "no range is set, so points can't be used."}
-        </p>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <label className="flex items-center gap-2 text-[13px] text-slate-700">
-            <input type="checkbox" checked={c.redeem.withCoupon} onChange={(e) => set("redeem", { withCoupon: e.target.checked })} /> Allow points on a bill that already has a coupon
-          </label>
-          <label className="flex items-center gap-2 text-[13px] text-slate-700">
-            <input type="checkbox" checked={c.redeem.withManual} onChange={(e) => set("redeem", { withManual: e.target.checked })} /> Allow points on a bill with a manual discount
-          </label>
-          <label className="flex items-center gap-2 text-[13px] text-slate-700">
-            <input type="checkbox" checked={c.redeem.withReward} onChange={(e) => set("redeem", { withReward: e.target.checked })} /> Allow points on a bill that also claims a free gift
-          </label>
-        </div>
-        <div className="mt-4">
-          <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Categories that can&apos;t be paid for with points</span>
-          <Chips all={cats} picked={c.redeem.excludedCategories} onChange={(v) => set("redeem", { excludedCategories: v })} none="Points can pay for any category" />
-        </div>
-        <div className="mt-4">
-          <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Items that can&apos;t be paid for with points</span>
-          <ItemPicker products={s.products} picked={c.redeem.excludedProductIds} onChange={(v) => set("redeem", { excludedProductIds: v })} none="Points can pay for any item" />
+
+        <div className="mt-4 rounded-xl border border-slate-100 p-3.5">
+          <b className="text-[13px] text-slate-900">Things points can&apos;t be used to pay for</b>
+          <p className={cx(note, "mb-2")}>Leave empty if points can pay for anything.</p>
+          <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">By category</span>
+          <Chips all={cats} picked={c.redeem.excludedCategories} onChange={(v) => set("redeem", { excludedCategories: v })} none="No category is excluded" />
+          <span className="mb-1 mt-3 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Single items</span>
+          <ItemPicker products={s.products} picked={c.redeem.excludedProductIds} onChange={(v) => set("redeem", { excludedProductIds: v })} none="No single item is excluded" />
         </div>
       </Card>
 
@@ -221,7 +286,7 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
         <div className="space-y-3">
           <Switch on={c.gifts.points} onChange={(v) => set("gifts", { points: v })} label="Gifts customers unlock with points" />
           <Switch on={c.gifts.milestone} onChange={(v) => set("gifts", { milestone: v })} label="Gifts for total spending" />
-          <Switch on={c.gifts.offers} onChange={(v) => set("gifts", { offers: v })} label="Offers on the bill (spend ₹500, get a juice…)" />
+          <Switch on={c.gifts.offers} onChange={(v) => set("gifts", { offers: v })} label="Offers on the bill" />
         </div>
         <div className="mt-4 space-y-2.5 border-t border-slate-100 pt-4">
           <label className="flex items-start gap-2.5 text-[13px] text-slate-700">
@@ -244,13 +309,10 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
 
       {/* expiry */}
       <Card title="Points expiry">
-        <p className={cx(note, "mb-3")}>Leave at 0 if points should never run out. Otherwise points expire this many days after they were earned — the oldest are used first — and customers are flagged a little before.</p>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <p className={cx(note, "mb-3")}>Leave at 0 if points should never run out. Otherwise points expire this many days after they were earned — the oldest are used first. Customers whose points are about to expire are flagged on their profile.</p>
+        <div className="max-w-sm">
           <Field label="Points expire after (days)" hint="0 = never. Applies to points earned from now on.">
             <input type="number" min={0} className={small} value={c.expiry.days} onChange={(e) => set("expiry", { days: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} />
-          </Field>
-          <Field label="Warn this many days before" hint="Shown on the customer's profile">
-            <input type="number" min={1} className={small} value={c.expiry.warnDays} onChange={(e) => set("expiry", { warnDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
           </Field>
         </div>
       </Card>
@@ -287,6 +349,13 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
             <input type="number" min={1} className={small} value={c.crm.lostDays} onChange={(e) => set("crm", { lostDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
           </Field>
         </div>
+        {crmProblems.length > 0 && (
+          <ul className="mt-3 space-y-1 rounded-xl bg-amber-50 px-3.5 py-2.5 text-[12.5px] font-semibold text-amber-800">
+            {crmProblems.map((w) => (
+              <li key={w}>⚠ {w} <span className="font-normal">They are put in order when you save.</span></li>
+            ))}
+          </ul>
+        )}
       </Card>
 
       {/* billing and receipts */}
@@ -318,6 +387,7 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
         <p className={cx(note, "mb-4")}>
           Messages are prepared after each event and kept in the customer&apos;s history — only for customers who agreed to WhatsApp messages. A browser can&apos;t send WhatsApp by itself, so staff tap <b>Send on WhatsApp</b> to open the chat with the message ready. WhatsApp doesn&apos;t report delivery, so they are shown as &ldquo;Opened in WhatsApp&rdquo;, never &ldquo;Sent&rdquo;. Billing is never held up by a message.
         </p>
+        {!c.messages.enabled && <p className="mb-3 rounded-xl bg-amber-50 px-3.5 py-2.5 text-[12.5px] font-semibold text-amber-800">All WhatsApp messages are switched off above — the switches below have no effect until you switch them on.</p>}
         <div className="space-y-4">
           {MESSAGE_META.map((m) => (
             <div key={m.key} className="rounded-xl border border-slate-100 p-3.5">

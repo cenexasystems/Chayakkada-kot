@@ -297,7 +297,7 @@ export function sanitizeConfig(raw: unknown): LoyaltyConfig {
       maxPerReferrer: i(rf.maxPerReferrer, 0, 100000, D.referral.maxPerReferrer),
       tiers: rf.tiers === undefined ? D.referral.tiers : tiersOf(rf.tiers),
     },
-    crm: {
+    crm: crmOrdered({
       newDays: i(c.newDays, 1, 3650, D.crm.newDays),
       regularVisits: i(c.regularVisits, 1, 1000, D.crm.regularVisits),
       frequentVisits: i(c.frequentVisits, 1, 1000, D.crm.frequentVisits),
@@ -307,12 +307,30 @@ export function sanitizeConfig(raw: unknown): LoyaltyConfig {
       atRiskDays: i(c.atRiskDays, 1, 3650, D.crm.atRiskDays),
       inactiveDays: i(c.inactiveDays, 1, 3650, D.crm.inactiveDays),
       lostDays: i(c.lostDays, 1, 3650, D.crm.lostDays),
-    },
+    }),
   };
 }
 
+type Crm = LoyaltyConfig["crm"];
+
+/** Customer-group lines must run in order (a customer can't be "lost" before they are "inactive"), so a saved set is always put in order. */
+export function crmOrdered(c: Crm): Crm {
+  const inactiveDays = Math.max(c.inactiveDays, c.atRiskDays);
+  return { ...c, frequentVisits: Math.max(c.frequentVisits, c.regularVisits), inactiveDays, lostDays: Math.max(c.lostDays, inactiveDays), vipSpend: Math.max(c.vipSpend, c.highValue) };
+}
+
+/** What the customer-group numbers contradict, in plain words — saving puts them in order. */
+export function crmWarnings(c: Crm): string[] {
+  const out: string[] = [];
+  if (c.frequentVisits < c.regularVisits) out.push(`“Frequent” (${c.frequentVisits} visits) should be more than “Regular” (${c.regularVisits} visits).`);
+  if (c.inactiveDays < c.atRiskDays) out.push(`“Inactive” (${c.inactiveDays} days) should come after “At risk” (${c.atRiskDays} days).`);
+  if (c.lostDays < c.inactiveDays) out.push(`“Lost” (${c.lostDays} days) should come after “Inactive” (${c.inactiveDays} days).`);
+  if (c.vipSpend < c.highValue) out.push(`“VIP” spending (₹${c.vipSpend}) should be more than “High value” (₹${c.highValue}).`);
+  return out;
+}
+
 /** Plain-language problems with a set of redemption ranges (empty = all good). Gaps and overlaps are warned about, never silently fixed. */
-export function rangeWarnings(ranges: RedeemRange[]): string[] {
+export function rangeWarnings(ranges: RedeemRange[], pointValue = 0): string[] {
   const out: string[] = [];
   const list = [...ranges].sort((a, b) => a.from - b.from);
   const label = (r: RedeemRange) => `₹${r.from}${r.to === null ? " and above" : `–₹${r.to}`}`;
@@ -321,6 +339,8 @@ export function rangeWarnings(ranges: RedeemRange[]): string[] {
     if (r.to !== null && r.to < r.from) out.push(`${label(r)}: the top of the range is lower than the start.`);
     if (r.min < 1) out.push(`${label(r)}: the minimum points should be at least 1.`);
     if (r.max < r.min) out.push(`${label(r)}: the maximum (${r.max}) is lower than the minimum (${r.min}).`);
+    // the smallest bill in a range must be able to cover the minimum points, or customers with such a bill are turned away
+    if (pointValue > 0 && r.min >= 1 && r.min * pointValue > r.from + 1e-9) out.push(`${label(r)}: the minimum ${r.min} points is worth ₹${Math.round(r.min * pointValue * 100) / 100}, which is more than the smallest bill in this range (₹${r.from}) — those bills can't use points. Lower the minimum or the point value.`);
   }
   for (let k = 1; k < list.length; k++) {
     const a = list[k - 1];

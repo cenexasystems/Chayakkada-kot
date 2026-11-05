@@ -565,7 +565,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
               </div>
             </div>
 
-            <RedeemBox lk={loyal.lk} sel={lSel} setSel={chooseReward} pts={lPts} setPts={setLPts} info={loy} earn={earns} />
+            <RedeemBox lk={loyal.lk} sel={lSel} setSel={chooseReward} pts={lPts} setPts={setLPts} info={loy} earn={earns} net={Math.max(0, calc.subtotal - calc.discount)} nameOf={(id) => s.products.find((p) => p.id === id)?.name ?? ""} />
 
             <GiftPanel ents={ents} added={addedGifts} toggle={toggleGift} products={s.products} />
 

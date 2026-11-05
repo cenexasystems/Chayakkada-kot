@@ -1043,7 +1043,7 @@ export async function lookup(phoneRaw: unknown): Promise<LoyaltyLookup> {
   const cfg = await getConfig(q);
   const phone = mobile(phoneRaw);
   const offers = (await q.select().from(giftOffers).where(eq(giftOffers.active, true))) as GiftOffer[];
-  const blank = { enabled: cfg.enabled, config: cfg, customer: null, knownName: "", vouchers: [] as Voucher[], rewards: [] as Reward[], offers, firstPurchase: true };
+  const blank = { enabled: cfg.enabled, config: cfg, customer: null, knownName: "", vouchers: [] as Voucher[], rewards: [] as Reward[], offers, spendRewards: [] as LoyaltyLookup["spendRewards"], firstPurchase: true };
   if (!phone) return blank;
   const now = Date.now();
   const [c, history, rewards] = await Promise.all([byPhone(q, phone), billsOf(q, phone), q.select().from(loyaltyRewards).where(and(eq(loyaltyRewards.active, true), eq(loyaltyRewards.trigger, "points")))]);
@@ -1051,7 +1051,16 @@ export async function lookup(phoneRaw: unknown): Promise<LoyaltyLookup> {
   if (!c) return { ...blank, knownName };
   const vouchers = (await q.select().from(loyaltyVouchers).where(and(eq(loyaltyVouchers.customerId, c.id), eq(loyaltyVouchers.status, "issued")))).filter((v) => voucherLive(v, now));
   const firstPurchase = !(await first(q.select({ id: loyaltyLedger.id }).from(loyaltyLedger).where(and(eq(loyaltyLedger.customerId, c.id), eq(loyaltyLedger.type, "purchase")))));
-  return { ...blank, customer: c, knownName, vouchers, rewards: cfg.gifts.points ? rewards.filter((r) => r.kind === "free_item" && !rewardAvailable(r, c.tier, now)) : [], firstPurchase };
+  // progress towards each spending reward: paid bills so far, counted the way the server counts them
+  const spendRewards: LoyaltyLookup["spendRewards"] = [];
+  if (cfg.gifts.milestone) {
+    const ms = await q.select().from(loyaltyRewards).where(and(eq(loyaltyRewards.active, true), eq(loyaltyRewards.trigger, "milestone")));
+    for (const r of ms) {
+      if (!(r.milestoneAmount > 0) || rewardAvailable(r, c.tier, now)) continue;
+      spendRewards.push({ id: r.id, name: r.name, giftQty: r.giftQty, productId: r.productId, amount: r.milestoneAmount, progress: await spendOf(q, c.phone, undefined, cfg.gifts.countOldBills ? 0 : r.createdAt) });
+    }
+  }
+  return { ...blank, customer: c, knownName, vouchers, spendRewards, rewards: cfg.gifts.points ? rewards.filter((r) => r.kind === "free_item" && !rewardAvailable(r, c.tier, now)) : [], firstPurchase };
 }
 
 /** The WhatsApp messages prepared for one bill or one customer, newest first. */

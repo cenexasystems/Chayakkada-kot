@@ -253,5 +253,7 @@ export type LoyaltyLookup = {
   rewards: Reward[];
   /** the shop's active bill offers (these work for anyone, member or not) */
   offers: GiftOffer[];
+  /** the customer's progress towards each spending reward (it unlocks once a paid bill takes them past the amount) */
+  spendRewards: { id: string; name: string; giftQty: number; productId: string | null; amount: number; progress: number }[];
   firstPurchase: boolean;
 };

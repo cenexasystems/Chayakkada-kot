@@ -112,7 +112,7 @@ export function redeemCap(c: RedeemCtx): { maxPoints: number; minPoints: number;
   if (c.available < range.min) return no(`A bill of ₹${Math.floor(eligible)} needs at least ${range.min} points to redeem — ${c.available} available`);
   // never more than the range allows, the customer owns, or the eligible amount itself
   const maxPoints = Math.min(c.available, range.max, Math.floor(eligible / r.pointValue + 1e-9));
-  if (maxPoints < range.min) return no("The bill is too small for the minimum points in its range");
+  if (maxPoints < range.min) return no(`A bill of ₹${Math.floor(eligible)} can't take the ${range.min}-point minimum for its range (that is ₹${round2(range.min * r.pointValue)} — more than the bill can be paid with points)`);
   return { maxPoints, minPoints: range.min, maxAmount: pointsValue(maxPoints, c.cfg), reason: "" };
 }
 

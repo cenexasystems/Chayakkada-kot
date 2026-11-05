@@ -230,7 +230,7 @@ function EnrolModal({ phone, name: start, onClose, onDone, onJoined }: { phone: 
 }
 
 /* ---------------- redeem box (bill summary) ---------------- */
-export function RedeemBox({ lk, sel, setSel, pts, setPts, info, earn }: { lk: LoyaltyLookup | null; sel: string; setSel: (v: string) => void; pts: string; setPts: (v: string) => void; info: ReturnType<typeof loyaltyCalc>; earn: number }) {
+export function RedeemBox({ lk, sel, setSel, pts, setPts, info, earn, net = 0, nameOf }: { lk: LoyaltyLookup | null; sel: string; setSel: (v: string) => void; pts: string; setPts: (v: string) => void; info: ReturnType<typeof loyaltyCalc>; earn: number; /** what this bill adds to the customer's spending */ net?: number; nameOf?: (productId: string | null) => string }) {
   const c = lk?.customer;
   if (!lk || !c || !lk.enabled) return null;
   if (c.status !== "active") return <p className="border-t border-dashed border-slate-200 pt-4 text-[12.5px] text-slate-500">This customer&apos;s loyalty account is deactivated — no points on this bill.</p>;
@@ -275,6 +275,9 @@ export function RedeemBox({ lk, sel, setSel, pts, setPts, info, earn }: { lk: Lo
         </div>
       )}
       {cfg.redeem.enabled && !pts && info.cap.reason && <p className="text-[11.5px] text-slate-400">{info.cap.reason}.</p>}
+      {cfg.redeem.enabled && !!pts && info.cap.reason && (
+        <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[12px] font-semibold text-amber-800">These points are NOT being used: {info.cap.reason.charAt(0).toLowerCase() + info.cap.reason.slice(1)}. (The owner can change this in Loyalty → Settings → Using points.)</p>
+      )}
       {cfg.redeem.enabled && !info.cap.reason && !pts && (
         <p className="text-[11.5px] text-slate-400">
           Use {info.cap.minPoints} to {info.cap.maxPoints} points on this bill ({rupee(pointsValue(info.cap.minPoints, cfg))} to {rupee(info.cap.maxAmount)} off) · 1 point = {rupee(cfg.redeem.pointValue)}
@@ -286,6 +289,24 @@ export function RedeemBox({ lk, sel, setSel, pts, setPts, info, earn }: { lk: Lo
         </p>
       )}
       {earn > 0 && <p className="text-[12px] font-semibold text-amber-700">This bill earns about {earn} points</p>}
+      {lk.spendRewards.map((r) => {
+        const after = r.progress + net;
+        const unlocks = Math.floor(after / r.amount) > Math.floor(r.progress / r.amount);
+        const gift = `${r.giftQty > 1 ? `${r.giftQty} × ` : ""}${nameOf?.(r.productId) || "gift"}`;
+        return (
+          <p key={r.id} className={unlocks ? "rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[12px] font-semibold text-emerald-800" : "text-[11.5px] text-slate-500"}>
+            {unlocks ? (
+              <>
+                🎁 <b>{r.name}</b> ({gift}) unlocks when you save this bill — the customer claims it on their <b>next</b> bill.
+              </>
+            ) : (
+              <>
+                {r.name} ({gift}): {rupee(r.progress % r.amount)} of {rupee(r.amount)} spent{net > 0 ? ` — this bill brings it to ${rupee((after) % r.amount)}` : ""}. It unlocks on the bill that reaches {rupee(r.amount)}, then is claimed on the next one.
+              </>
+            )}
+          </p>
+        );
+      })}
     </div>
   );
 }
