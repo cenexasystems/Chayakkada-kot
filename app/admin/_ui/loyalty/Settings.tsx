@@ -6,6 +6,7 @@ import { DEFAULT_CONFIG, MESSAGE_FIELDS, MESSAGE_META, rangeWarnings, type Loyal
 import type { LoyaltyState } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
 import { Btn, Card, Field, Switch as RawSwitch, cx, downloadExcel, inputLineCls } from "../kit";
+import { ItemPickerModal } from "../ItemSelect";
 
 /** A switch with its words next to it (the kit switch only labels itself for screen readers). */
 function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
@@ -350,20 +351,16 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
   );
 }
 
-/** Pick individual menu items from a list; the chosen ones show as chips that can be removed. */
-function ItemPicker({ products, picked, onChange, none }: { products: { id: string; name: string; category: string }[]; picked: string[]; onChange: (v: string[]) => void; none: string }) {
-  const left = [...products].filter((p) => !picked.includes(p.id)).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+/** Pick individual menu items (category first, with search); the chosen ones show as chips that can be removed. */
+function ItemPicker({ products, picked, onChange, none }: { products: { id: string; name: string; category: string; price?: number }[]; picked: string[]; onChange: (v: string[]) => void; none: string }) {
+  const [open, setOpen] = useState(false);
   const name = (id: string) => products.find((p) => p.id === id)?.name ?? "(removed item)";
   return (
     <div className="space-y-2">
-      <select className={inputLineCls} value="" onChange={(e) => e.target.value && onChange([...picked, e.target.value])} aria-label="Add an item">
-        <option value="">Add an item…</option>
-        {left.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name} — {p.category}
-          </option>
-        ))}
-      </select>
+      <button type="button" onClick={() => setOpen(true)} className={cx(inputLineCls, "flex items-center justify-between text-left text-slate-500")} aria-label="Add an item">
+        Add an item…
+        <span className="text-[12px] text-slate-400">choose a category, then the item</span>
+      </button>
       <div className="flex flex-wrap items-center gap-2">
         {picked.map((id) => (
           <button key={id} type="button" onClick={() => onChange(picked.filter((x) => x !== id))} className="h-8 rounded-full border border-red-600 bg-red-600 px-3 text-[12.5px] font-semibold text-white" title="Remove">
@@ -372,6 +369,7 @@ function ItemPicker({ products, picked, onChange, none }: { products: { id: stri
         ))}
         {!picked.length && <span className="text-[12px] text-slate-400">{none}</span>}
       </div>
+      {open && <ItemPickerModal products={products.filter((p) => !picked.includes(p.id))} onClose={() => setOpen(false)} onPick={(id) => (id && onChange([...picked, id]), setOpen(false))} />}
     </div>
   );
 }

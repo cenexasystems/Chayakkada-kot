@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { StockLedger, StockMoveType } from "@/lib/types";
 import { rangeOf, type Period } from "@/lib/analytics";
 import { useLedger } from "./ledger";
+import { ItemSelect } from "./ItemSelect";
 import { useAdmin } from "./Store";
 import { Badge, Btn, Card, DateRange, Empty, Kpi, Page, PageHead, Pills, SearchBox, cx, downloadExcel, fmtDate, fmtDateTime, fmtTime, type BadgeTone } from "./kit";
 
@@ -23,7 +24,7 @@ const td = "px-4 py-3 text-[13px]";
 const SIZE = 20;
 
 export default function StockMovementsPage() {
-  const { toast } = useAdmin();
+  const { toast, s } = useAdmin();
   const [exporting, setExporting] = useState(false);
   const [period, setPeriod] = useState<Period>("week");
   const [from, setFrom] = useState("");
@@ -117,14 +118,15 @@ export default function StockMovementsPage() {
               </option>
             ))}
           </select>
-          <select className="h-10 max-w-[200px] rounded-full border border-slate-200 bg-white px-4 text-[13px] font-semibold text-slate-700 outline-none" value={pid} onChange={(e) => filter(setPid)(e.target.value)} aria-label="Product">
-            <option value="all">All products</option>
-            {names.map((n) => (
-              <option key={n.id} value={n.id}>
-                {n.name}
-              </option>
-            ))}
-          </select>
+          <ItemSelect
+            className="!h-10 w-[210px] !rounded-full"
+            products={names.map((n) => ({ id: n.id, name: n.name, category: s.products.find((p) => p.id === n.id)?.category ?? "Removed items" }))}
+            value={pid === "all" ? "" : pid}
+            onChange={(v) => filter(setPid)(v || "all")}
+            none="All products"
+            clear="All products"
+            title="Filter by product"
+          />
           <SearchBox value={q} onChange={(v) => (setQ(v), setPage(1))} placeholder="Search product, note, invoice…" className="w-full sm:w-64" />
         </div>
       </div>

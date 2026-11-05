@@ -6,6 +6,7 @@ import type { Product } from "@/lib/types";
 import type { GiftOffer, LoyaltyState, Reward } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
 import { Badge, Btn, Card, Field, Modal, cx, downloadExcel, inputLineCls } from "../kit";
+import { ItemSelect } from "../ItemSelect";
 
 const TXT = "text-[12.5px] text-slate-500";
 
@@ -143,17 +144,9 @@ function Row({ name, line, active, used, onEdit, onToggle, onRemove }: { name: s
 }
 
 function ProductSelect({ value, onChange, products, none }: { value: string; onChange: (v: string) => void; products: Product[]; none?: string }) {
-  const list = [...products].filter((p) => p.active || p.id === value).sort((a, b) => a.name.localeCompare(b.name));
-  return (
-    <select className={inputLineCls} value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{none ?? "Pick an item from your menu…"}</option>
-      {list.map((p) => (
-        <option key={p.id} value={p.id}>
-          {p.name} — {rupee(p.price)}
-        </option>
-      ))}
-    </select>
-  );
+  const list = products.filter((p) => p.active || p.id === value);
+  // category first, then the item — with a search box
+  return <ItemSelect products={list} value={value} onChange={onChange} none={none} clear={none} />;
 }
 
 function RewardForm({ trigger, r, products, onClose }: { trigger: "points" | "milestone"; r?: Reward; products: Product[]; onClose: () => void }) {

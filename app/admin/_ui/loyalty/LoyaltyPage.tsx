@@ -82,6 +82,16 @@ export default function LoyaltyPage() {
       {!data && !error && <p className="py-16 text-center text-[13px] text-slate-400">Loading loyalty data…</p>}
       {data && (
         <>
+          <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <Stat label="Loyalty customers" value={data.customers.length.toLocaleString("en-IN")} hint={range ? `${data.customers.filter((c) => within(c.createdAt, range)).length} joined · ${label}` : undefined} />
+            <Stat label="Points earned" value={sumPts(pd.ledger, EARN_TYPES).toLocaleString("en-IN")} tone="green" hint={label} />
+            <Stat label="Points redeemed" value={(0 - sumPts(pd.ledger, USE_TYPES)).toLocaleString("en-IN")} tone="red" hint={label} />
+            <Stat label="Available points" value={data.totals.outstanding.toLocaleString("en-IN")} tone="amber" hint="held by customers now" />
+            <Stat label="Free gifts given" value={giftsIn(s.bills, range).toLocaleString("en-IN")} hint={`on paid bills · ${label}`} />
+          </div>
+          {data.mismatched.length > 0 && <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-[13px] font-semibold text-red-700">{data.mismatched.length} customer balance(s) don&apos;t match their points history — please tell your developer.</p>}
+          {tabs.length > 1 && <Tabs value={tab} options={tabs} onChange={setTab} />}
+          {tab !== "rewards" && tab !== "settings" && (
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <Pills
               label="Period:"
@@ -98,15 +108,7 @@ export default function LoyaltyPage() {
             />
             {period === "custom" && <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} />}
           </div>
-          <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
-            <Stat label="Loyalty customers" value={data.customers.length.toLocaleString("en-IN")} hint={range ? `${data.customers.filter((c) => within(c.createdAt, range)).length} joined · ${label}` : undefined} />
-            <Stat label="Points earned" value={sumPts(pd.ledger, EARN_TYPES).toLocaleString("en-IN")} tone="green" hint={label} />
-            <Stat label="Points redeemed" value={(0 - sumPts(pd.ledger, USE_TYPES)).toLocaleString("en-IN")} tone="red" hint={label} />
-            <Stat label="Available points" value={data.totals.outstanding.toLocaleString("en-IN")} tone="amber" hint="held by customers now" />
-            <Stat label="Free gifts given" value={giftsIn(s.bills, range).toLocaleString("en-IN")} hint={`on paid bills · ${label}`} />
-          </div>
-          {data.mismatched.length > 0 && <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-[13px] font-semibold text-red-700">{data.mismatched.length} customer balance(s) don&apos;t match their points history — please tell your developer.</p>}
-          {tabs.length > 1 && <Tabs value={tab} options={tabs} onChange={setTab} />}
+          )}
           {admin && tab === "dashboard" && <Dashboard d={data} pd={pd} onOpen={setTab} />}
           {tab === "customers" && <Customers d={data} pd={pd} reload={reload} />}
           {admin && tab === "rewards" && <Rewards d={data} />}
