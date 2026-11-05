@@ -234,6 +234,8 @@ export type LoyaltyState = {
   totals: { earned: number; redeemed: number; outstanding: number; giftsGiven: number };
   /** customer ids whose balance doesn't match their ledger / point lots — should stay empty */
   mismatched: string[];
+  /** points earned and redeemed per month */
+  months: { month: string; earned: number; redeemed: number }[];
   /** points about to expire, per customer */
   expiring: Record<string, { points: number; expiresAt: number }>;
 };

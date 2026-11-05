@@ -449,7 +449,7 @@ export async function stockLedger(p: URLSearchParams): Promise<StockLedger> {
         name: sql<string>`max(${M.productName})`,
         in: sql<number>`coalesce(sum(case when ${M.qty} > 0 then ${M.qty} else 0 end), 0)::int`,
         out: sql<number>`coalesce(sum(case when ${M.qty} < 0 then -${M.qty} else 0 end), 0)::int`,
-        close: sql<number | null>`(array_agg(${M.balanceAfter} order by ${M.createdAt} desc, ${M.id} desc))[1]`,
+        close: sql<number | null>`(array_agg(${M.balanceAfter} order by ${M.createdAt} desc, ${M.id} desc) filter (where ${M.note} not like '%stock not counted%'))[1]`,
       })
       .from(M)
       .where(inRange)
@@ -819,7 +819,11 @@ async function createBill(tx: Tx, a: Args, actor = "admin"): Promise<Bill> {
   // free gifts leave the same stock as anything sold, but are recorded as their own kind of movement
   const who = [str(a.customerName, 60) || s?.customerName || "Walk-in customer", billPhone].filter(Boolean).join(" ");
   for (const it of items) {
-    if (it.free && it.productId) await moveStock(tx, new Map([[it.productId, -it.qty]]), { type: "gift", ref: invoiceNo, note: `FREE GIFT / LOYALTY REWARD · ${it.gift || "Free gift"} · ${who} · by ${actor}` }, now);
+    if (!(it.free && it.productId)) continue;
+    const note = `FREE GIFT / LOYALTY REWARD · ${it.gift || "Free gift"} · ${who} · by ${actor}`;
+    const moved = await moveStock(tx, new Map([[it.productId, -it.qty]]), { type: "gift", ref: invoiceNo, note }, now);
+    // an item whose stock isn't counted has nothing to reduce, but the gift is still recorded in the Stock movement log
+    if (moved[0] && moved[0].new_stock === null) await tx.insert(stockMovements).values({ id: uid(), productId: it.productId, productName: moved[0].name, type: "gift", qty: -it.qty, balanceAfter: 0, note: `${note} · stock not counted for this item`, ref: invoiceNo, createdAt: now });
   }
 
   const [bill] = await tx

@@ -5,7 +5,7 @@ import { rupee } from "@/lib/money";
 import { DEFAULT_CONFIG, MESSAGE_FIELDS, MESSAGE_META, rangeWarnings, type LoyaltyConfig, type MessageKey, type RedeemRange } from "@/lib/loyalty/config";
 import type { LoyaltyState } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
-import { Btn, Card, Field, Switch as RawSwitch, cx, inputLineCls } from "../kit";
+import { Btn, Card, Field, Switch as RawSwitch, cx, downloadExcel, inputLineCls } from "../kit";
 
 /** A switch with its words next to it (the kit switch only labels itself for screen readers). */
 function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
@@ -42,6 +42,44 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
     setBusy(false);
     setReason("");
   };
+  const yes = (v: boolean) => (v ? "On" : "Off");
+  const exportSettings = () =>
+    downloadExcel(`loyalty-settings-${new Date().toISOString().slice(0, 10)}`, [
+      {
+        name: "Settings",
+        rows: [
+          ["Setting", "Value"],
+          ["Loyalty programme", yes(saved.enabled)],
+          ["Points for every ₹100", saved.earn.per100],
+          ["Value of 1 point (₹)", saved.redeem.pointValue],
+          ["Smallest bill that earns points (₹)", saved.earn.minBill],
+          ["Rounding of points", saved.earn.rounding],
+          ["Categories that don't earn", saved.earn.excludedCategories.join(", ")],
+          ["Items that don't earn", saved.earn.excludedProductIds.map((id) => s.products.find((p) => p.id === id)?.name ?? id).join(", ")],
+          ["Using points", yes(saved.redeem.enabled)],
+          ["Points with a coupon", yes(saved.redeem.withCoupon)],
+          ["Points with a manual discount", yes(saved.redeem.withManual)],
+          ["Points with a free gift", yes(saved.redeem.withReward)],
+          ["Categories points can't pay for", saved.redeem.excludedCategories.join(", ")],
+          ["Items points can't pay for", saved.redeem.excludedProductIds.map((id) => s.products.find((p) => p.id === id)?.name ?? id).join(", ")],
+          ["Points gifts", yes(saved.gifts.points)],
+          ["Spending rewards", yes(saved.gifts.milestone)],
+          ["Bill offers", yes(saved.gifts.offers)],
+          ["Spending rewards count every bill ever", yes(saved.gifts.countOldBills)],
+          ["Restock free gifts when a bill is voided", yes(saved.gifts.restockOnVoid)],
+          ["Unlocked reward valid for (days, 0 = never)", saved.gifts.validityDays],
+          ["Points expire after (days, 0 = never)", saved.expiry.days],
+          ["Warn before expiry (days)", saved.expiry.warnDays],
+          ["Loyalty summary on receipts", yes(saved.display.receiptSummary)],
+          ["Consent box starts ticked", yes(saved.display.defaultConsent)],
+          ["Tidy deleted bills automatically", yes(saved.display.autoTidy)],
+          ["WhatsApp messages", yes(saved.messages.enabled)],
+          ...MESSAGE_META.map((m) => [`WhatsApp · ${m.label}`, `${yes(saved.messages.events[m.key])} — ${saved.messages.templates[m.key]}`]),
+        ],
+      },
+      { name: "Points ranges", rows: [["Bill from (₹)", "Up to (₹)", "Minimum points", "Maximum points"], ...saved.redeem.ranges.map((r) => [r.from, r.to ?? "and above", r.min, r.max])] },
+      { name: "Customer groups", rows: [["Setting", "Value"], ["New for the first (days)", saved.crm.newDays], ["Regular from (visits)", saved.crm.regularVisits], ["Frequent from (visits)", saved.crm.frequentVisits], ["…counted over (days)", saved.crm.frequentDays], ["High value from (₹)", saved.crm.highValue], ["VIP from (₹)", saved.crm.vipSpend], ["At risk after (days)", saved.crm.atRiskDays], ["Inactive after (days)", saved.crm.inactiveDays], ["Lost after (days)", saved.crm.lostDays]] },
+    ]);
   const setRange = (i: number, patch: Partial<RedeemRange>) => set("redeem", { ranges: c.redeem.ranges.map((r, k) => (k === i ? { ...r, ...patch } : r)) });
 
   return (
@@ -51,6 +89,9 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
         <Switch on={c.enabled} onChange={(v) => setC({ ...c, enabled: v })} label={c.enabled ? "Loyalty programme is on" : "Loyalty programme is off — nobody earns or uses points"} />
         <div className="flex flex-wrap items-center gap-2">
           <input className="h-10 w-64 rounded-xl border border-slate-200 bg-white px-3 text-[13px] outline-none focus:border-slate-400" value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} placeholder="Reason for the change (audit log)" />
+          <Btn icon="download" onClick={exportSettings}>
+            Excel
+          </Btn>
           <Btn disabled={!dirty || busy} onClick={() => setC(saved)}>
             Discard
           </Btn>
@@ -84,6 +125,10 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
         <div className="mt-4">
           <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Categories that don&apos;t earn points</span>
           <Chips all={cats} picked={c.earn.excludedCategories} onChange={(v) => set("earn", { excludedCategories: v })} none="Every category earns points" />
+        </div>
+        <div className="mt-4">
+          <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Items that don&apos;t earn points</span>
+          <ItemPicker products={s.products} picked={c.earn.excludedProductIds} onChange={(v) => set("earn", { excludedProductIds: v })} none="Every item earns points" />
         </div>
         <p className="mt-4 rounded-xl bg-slate-50 px-3.5 py-2.5 text-[13px] text-slate-700">
           <b>In plain words:</b> {c.earn.per100} points for every ₹100 — a ₹500 bill earns {Math.floor((500 / 100) * c.earn.per100 + 1e-9)} points. 1 point is worth {rupee(c.redeem.pointValue)}, so those points are worth {rupee(Math.floor((500 / 100) * c.earn.per100 + 1e-9) * c.redeem.pointValue)}.
@@ -163,6 +208,10 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
           <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Categories that can&apos;t be paid for with points</span>
           <Chips all={cats} picked={c.redeem.excludedCategories} onChange={(v) => set("redeem", { excludedCategories: v })} none="Points can pay for any category" />
         </div>
+        <div className="mt-4">
+          <span className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">Items that can&apos;t be paid for with points</span>
+          <ItemPicker products={s.products} picked={c.redeem.excludedProductIds} onChange={(v) => set("redeem", { excludedProductIds: v })} none="Points can pay for any item" />
+        </div>
       </Card>
 
       {/* gifts */}
@@ -201,6 +250,40 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
           </Field>
           <Field label="Warn this many days before" hint="Shown on the customer's profile">
             <input type="number" min={1} className={small} value={c.expiry.warnDays} onChange={(e) => set("expiry", { warnDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
+          </Field>
+        </div>
+      </Card>
+
+      {/* customer groups */}
+      <Card title="Customer groups (CRM)">
+        <p className={cx(note, "mb-3")}>Every loyalty customer is put in a group from their paid bills — shown in the Customer CRM tab. These numbers decide where the lines fall.</p>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="“New” for the first (days)">
+            <input type="number" min={1} className={small} value={c.crm.newDays} onChange={(e) => set("crm", { newDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
+          </Field>
+          <Field label="“Regular” from (visits)">
+            <input type="number" min={1} className={small} value={c.crm.regularVisits} onChange={(e) => set("crm", { regularVisits: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
+          </Field>
+          <Field label="“Frequent” from (visits)">
+            <input type="number" min={1} className={small} value={c.crm.frequentVisits} onChange={(e) => set("crm", { frequentVisits: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
+          </Field>
+          <Field label="…counted over the last (days)">
+            <input type="number" min={1} className={small} value={c.crm.frequentDays} onChange={(e) => set("crm", { frequentDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
+          </Field>
+          <Field label="“High value” from spending (₹)">
+            <input type="number" min={0} className={small} value={c.crm.highValue} onChange={(e) => set("crm", { highValue: Math.max(0, Number(e.target.value) || 0) })} />
+          </Field>
+          <Field label="“VIP” from spending (₹)">
+            <input type="number" min={0} className={small} value={c.crm.vipSpend} onChange={(e) => set("crm", { vipSpend: Math.max(0, Number(e.target.value) || 0) })} />
+          </Field>
+          <Field label="“At risk” after (days away)">
+            <input type="number" min={1} className={small} value={c.crm.atRiskDays} onChange={(e) => set("crm", { atRiskDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
+          </Field>
+          <Field label="“Inactive” after (days away)">
+            <input type="number" min={1} className={small} value={c.crm.inactiveDays} onChange={(e) => set("crm", { inactiveDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
+          </Field>
+          <Field label="“Lost” after (days away)">
+            <input type="number" min={1} className={small} value={c.crm.lostDays} onChange={(e) => set("crm", { lostDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
           </Field>
         </div>
       </Card>
@@ -263,6 +346,32 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
           Words that are filled in for each customer: {MESSAGE_FIELDS.map((f) => `{${f}}`).join("  ")}
         </p>
       </Card>
+    </div>
+  );
+}
+
+/** Pick individual menu items from a list; the chosen ones show as chips that can be removed. */
+function ItemPicker({ products, picked, onChange, none }: { products: { id: string; name: string; category: string }[]; picked: string[]; onChange: (v: string[]) => void; none: string }) {
+  const left = [...products].filter((p) => !picked.includes(p.id)).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+  const name = (id: string) => products.find((p) => p.id === id)?.name ?? "(removed item)";
+  return (
+    <div className="space-y-2">
+      <select className={inputLineCls} value="" onChange={(e) => e.target.value && onChange([...picked, e.target.value])} aria-label="Add an item">
+        <option value="">Add an item…</option>
+        {left.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name} — {p.category}
+          </option>
+        ))}
+      </select>
+      <div className="flex flex-wrap items-center gap-2">
+        {picked.map((id) => (
+          <button key={id} type="button" onClick={() => onChange(picked.filter((x) => x !== id))} className="h-8 rounded-full border border-red-600 bg-red-600 px-3 text-[12.5px] font-semibold text-white" title="Remove">
+            ✕ {name(id)}
+          </button>
+        ))}
+        {!picked.length && <span className="text-[12px] text-slate-400">{none}</span>}
+      </div>
     </div>
   );
 }

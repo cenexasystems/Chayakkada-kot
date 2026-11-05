@@ -6,17 +6,20 @@ import { useAdmin } from "../Store";
 import { Btn, Page, PageHead, Tabs } from "../kit";
 import { Stat, useLoyaltyState } from "./shared";
 import Customers from "./Customers";
+import Crm from "./Crm";
+import Dashboard from "./Dashboard";
+import RewardRecords from "./RewardRecords";
 import Rewards from "./Rewards";
 import SettingsTab from "./Settings";
 
-type Tab = "customers" | "rewards" | "settings";
+type Tab = "dashboard" | "customers" | "rewards" | "records" | "crm" | "settings";
 
-/* Loyalty: three sections only. Staff see Customers (look up, register, see points and rewards); the owner also sets up the
+/* Loyalty: Dashboard, Customers, Free Gifts & Rewards, Rewards earned, Customer CRM and Settings. Staff see Customers (look up, register, see points and rewards); the owner also sets up the
    gifts and the settings. */
 export default function LoyaltyPage() {
   const { role, act } = useAdmin();
   const admin = role === "admin";
-  const [tab, setTab] = useState<Tab>("customers");
+  const [tab, setTab] = useState<Tab>(admin ? "dashboard" : "customers");
   const { data, error, reload } = useLoyaltyState();
 
   // housekeeping once a day per browser: tidy the records of bills that were deleted
@@ -32,8 +35,11 @@ export default function LoyaltyPage() {
 
   const tabs: { v: Tab; t: string }[] = admin
     ? [
+        { v: "dashboard", t: "Dashboard" },
         { v: "customers", t: "Customers" },
         { v: "rewards", t: "Free Gifts & Rewards" },
+        { v: "records", t: "Rewards earned" },
+        { v: "crm", t: "Customer CRM" },
         { v: "settings", t: "Settings" },
       ]
     : [{ v: "customers", t: "Customers" }];
@@ -62,8 +68,11 @@ export default function LoyaltyPage() {
           </div>
           {data.mismatched.length > 0 && <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-[13px] font-semibold text-red-700">{data.mismatched.length} customer balance(s) don&apos;t match their points history — please tell your developer.</p>}
           {tabs.length > 1 && <Tabs value={tab} options={tabs} onChange={setTab} />}
+          {admin && tab === "dashboard" && <Dashboard d={data} onOpen={setTab} />}
           {tab === "customers" && <Customers d={data} reload={reload} />}
           {admin && tab === "rewards" && <Rewards d={data} />}
+          {admin && tab === "records" && <RewardRecords d={data} />}
+          {admin && tab === "crm" && <Crm d={data} />}
           {admin && tab === "settings" && <SettingsTab d={data} />}
         </>
       )}

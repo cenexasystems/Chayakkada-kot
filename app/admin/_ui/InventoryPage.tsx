@@ -762,7 +762,7 @@ export default function InventoryPage() {
                   className="sm:col-span-2"
                   hint={`Points one ${form.name || "item"} earns a member. Leave blank for the automatic rule${form.price ? ` (currently ${pointsPerUnit({ id: form.id ?? "", category: form.category, price: Number(form.price) || 0, loyaltyPoints: null }, s.loyaltyEarn)} pts)` : ""}. Customers see this on the menu.`}
                 >
-                  <input className={inputCls} type="number" min={0} step={1} inputMode="numeric" placeholder="Automatic" value={form.loyaltyPoints} onChange={(e) => setForm({ ...form, loyaltyPoints: e.target.value })} />
+                  <input className={inputCls} type="number" min={0} step={1} inputMode="numeric" placeholder={form.price ? `Automatic (${pointsPerUnit({ id: form.id ?? "", category: form.category, price: Number(form.price) || 0, loyaltyPoints: null }, s.loyaltyEarn)})` : "Automatic"} value={form.loyaltyPoints} onChange={(e) => setForm({ ...form, loyaltyPoints: e.target.value })} />
                 </Field>
               ) : (
                 <p className="rounded-xl bg-slate-50 px-4 py-2.5 text-[12.5px] text-slate-500 sm:col-span-2">Loyalty points for this item are set by the admin.</p>

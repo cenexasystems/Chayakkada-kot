@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { UPI_CHANNELS, type Bill, type UpiChannel, type Coupon, type DiscountType, type OrderItem, type PayMethod } from "@/lib/types";
 import { checkCoupon, computeBill, couponStatus, mergeItems, round2, rupee } from "@/lib/money";
 import { useAdmin, whoIs, type FloorTab } from "./Store";
@@ -9,6 +9,7 @@ import PrintModal, { PrintFormats } from "./PrintModal";
 import { Receipt, billText, waLink, type PrintFormat } from "./receipt";
 import { Badge, Btn, Icon, Modal, WaIcon, cx, fmtTime, ago } from "./kit";
 import { UpiQrCard } from "./UpiQrCard";
+import { pointsPerUnit } from "@/lib/loyalty/engine";
 import { GiftPanel, MemberStrip, RedeemBox, SavedLoyalty, earnPreview, giftEntitlements, loyaltyCalc, selectedGift, useBillOffers, useLoyaltyLookup } from "./loyalty/billing";
 
 type Line = { key: number; productId: string | null; name: string; price: string; qty: number };
@@ -30,6 +31,14 @@ const sigOf = (f: FloorTab) => f.orders.map((o) => o.id + o.status).join("|");
 
 const DEFAULT_GST = "18";
 
+/** The bill being typed. It lives outside the component, so going to another page and coming back to Billing finds
+    everything as it was — it is only cleared when the bill is saved (or the cashier clears it). */
+type Draft = {
+  mode: "tab" | "counter"; sel: string | null; lines: Line[]; name: string; phone: string; sig: string; coupon: string; mType: DiscountType; mVal: string; extra: string;
+  isGst: boolean; gstPct: string; pay: PayMethod; received: string; splitCash: string; splitCard: string; splitUpi: string; upiVia: UpiChannel | ""; linkSent: boolean; lSel: string; lPts: string; addedGifts: string[];
+};
+let DRAFT: Draft | null = null;
+
 let seq = 0;
 const blank = (): Line => ({ key: ++seq, productId: null, name: "", price: "", qty: 1 });
 const linesOf = (f: FloorTab): Line[] => {
@@ -46,45 +55,51 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
 
   const openTabs = counterOnly ? [] : floor;
   const start = !counterOnly && sessionId ? floor.find((f) => f.session.id === sessionId) : undefined;
+  const d = start ? null : DRAFT; // a bill typed earlier (a link that names a tab starts fresh)
 
   /* Default to Counter (walk-in). A direct link that names a tab still opens
      it in tab mode; open tabs on their own don't flip the default any more. */
-  const [mode, setMode] = useState<"tab" | "counter">(counterOnly ? "counter" : start ? "tab" : "counter");
-  const [sel, setSel] = useState<string | null>(start?.session.id ?? null);
-  const [lines, setLines] = useState<Line[]>(() => (start ? linesOf(start) : [blank()]));
-  const [name, setName] = useState(start?.session.customerName ?? "");
-  const [phone, setPhone] = useState(start?.session.customerPhone ?? "");
-  const [sig, setSig] = useState(start ? sigOf(start) : "");
-  const [coupon, setCoupon] = useState(start?.session.couponCode ?? "");
+  const [mode, setMode] = useState<"tab" | "counter">(counterOnly ? "counter" : start ? "tab" : d?.mode ?? "counter");
+  const [sel, setSel] = useState<string | null>(start?.session.id ?? d?.sel ?? null);
+  const [lines, setLines] = useState<Line[]>(() => (start ? linesOf(start) : d?.lines.length ? d.lines : [blank()]));
+  const [name, setName] = useState(start?.session.customerName ?? d?.name ?? "");
+  const [phone, setPhone] = useState(start?.session.customerPhone ?? d?.phone ?? "");
+  const [sig, setSig] = useState(start ? sigOf(start) : d?.sig ?? "");
+  const [coupon, setCoupon] = useState(start?.session.couponCode ?? d?.coupon ?? "");
   const [newCp, setNewCp] = useState<{ code: string; percent: string; minOrder: string } | null>(null);
-  const [mType, setMType] = useState<DiscountType>("amount");
-  const [mVal, setMVal] = useState("");
-  const [extra, setExtra] = useState("");
-  const [isGst, setIsGst] = useState(false);
-  const [gstPct, setGstPct] = useState(DEFAULT_GST);
-  const [pay, setPay] = useState<PayMethod>("cash");
-  const [received, setReceived] = useState("");
-  const [splitCash, setSplitCash] = useState("");
-  const [splitCard, setSplitCard] = useState("");
-  const [splitUpi, setSplitUpi] = useState("");
+  const [mType, setMType] = useState<DiscountType>(d?.mType ?? "amount");
+  const [mVal, setMVal] = useState(d?.mVal ?? "");
+  const [extra, setExtra] = useState(d?.extra ?? "");
+  const [isGst, setIsGst] = useState(d?.isGst ?? false);
+  const [gstPct, setGstPct] = useState(d?.gstPct ?? DEFAULT_GST);
+  const [pay, setPay] = useState<PayMethod>(d?.pay ?? "cash");
+  const [received, setReceived] = useState(d?.received ?? "");
+  const [splitCash, setSplitCash] = useState(d?.splitCash ?? "");
+  const [splitCard, setSplitCard] = useState(d?.splitCard ?? "");
+  const [splitUpi, setSplitUpi] = useState(d?.splitUpi ?? "");
   const [saveOpen, setSaveOpen] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [printFor, setPrintFor] = useState<Bill | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
   const [picking, setPicking] = useState(false); // "Pick from catalog" (multi-add) modal
   const [done, setDone] = useState<Bill | null>(null);
-  const [addedGifts, setAddedGifts] = useState<string[]>([]); // free gifts (by what entitles them) staff added to this bill
+  const [addedGifts, setAddedGifts] = useState<string[]>(d?.addedGifts ?? []); // free gifts (by what entitles them) staff added to this bill
   const [busy, setBusy] = useState(false);
   // loyalty: a reward ("v:REF" voucher or "r:id" catalogue reward) and points to redeem
   // how a UPI payment reaches the shop: picked by staff, or worked out (guest's phone / the WhatsApp link we sent / the counter QR)
-  const [upiVia, setUpiVia] = useState<UpiChannel | "">("");
-  const [linkSent, setLinkSent] = useState(false);
-  const [lSel, setLSel] = useState("");
-  const [lPts, setLPts] = useState("");
+  const [upiVia, setUpiVia] = useState<UpiChannel | "">(d?.upiVia ?? "");
+  const [linkSent, setLinkSent] = useState(d?.linkSent ?? false);
+  const [lSel, setLSel] = useState(d?.lSel ?? "");
+  const [lPts, setLPts] = useState(d?.lPts ?? "");
   const loyal = useLoyaltyLookup(phone, s.version);
   const offerLk = useBillOffers(s.version); // the shop's bill offers — they work for anyone, member or not
   // an active loyalty member decides which audience of coupons applies
   const member = loyal.lk?.customer?.status === "active";
+
+  // remember the bill as it is typed, so leaving this page and coming back doesn't lose it
+  useEffect(() => {
+    DRAFT = { mode, sel, lines, name, phone, sig, coupon, mType, mVal, extra, isGst, gstPct, pay, received, splitCash, splitCard, splitUpi, upiVia, linkSent, lSel, lPts, addedGifts };
+  }, [mode, sel, lines, name, phone, sig, coupon, mType, mVal, extra, isGst, gstPct, pay, received, splitCash, splitCard, splitUpi, upiVia, linkSent, lSel, lPts, addedGifts]);
 
   const f = mode === "tab" && sel ? floor.find((x) => x.session.id === sel) ?? null : null;
   const stale = f && sig && sigOf(f) !== sig;
@@ -141,6 +156,8 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
     }
   };
 
+  /* Points one unit of an item earns: the product's own number if the admin set one, otherwise the shop's rule */
+  const ptsOf = (productId: string | null, price: number) => pointsPerUnit(s.products.find((p) => p.id === productId) ?? { id: "", category: "", price, loyaltyPoints: null }, s.loyaltyEarn);
   const setLine = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
   /* ---------- totals ---------- */
@@ -434,6 +451,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
                   <span className="adm-num w-[96px] shrink-0 text-right leading-tight" aria-label="Line total">
                     <b className="block text-[14px] text-slate-900">{rupee((Number(l.price) || 0) * l.qty)}</b>
                     {l.qty > 1 && Number(l.price) > 0 && <small className="block text-[11px] font-semibold text-slate-500">{rupee(Number(l.price) || 0)} / pc</small>}
+                    {ptsOf(l.productId, Number(l.price) || 0) > 0 && <small className="block text-[11px] font-bold text-amber-700">+{ptsOf(l.productId, Number(l.price) || 0) * l.qty} pts</small>}
                   </span>
                   <button
                     type="button"
@@ -483,6 +501,7 @@ export default function BillingPage({ sessionId }: { sessionId?: string }) {
                     <span className="shrink-0 text-right leading-tight">
                       <b className="block">{rupee(i.price * i.qty)}</b>
                       {i.qty > 1 && <small className="block text-[11px] font-semibold text-slate-500">{rupee(i.price)} / pc</small>}
+                      {!i.free && ptsOf(i.productId, i.price) > 0 && <small className="block text-[11px] font-bold text-amber-700">+{ptsOf(i.productId, i.price) * i.qty} pts</small>}
                     </span>
                   </li>
                 ))}

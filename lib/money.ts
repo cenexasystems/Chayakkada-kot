@@ -132,6 +132,8 @@ export function loyaltySummary(b: Bill): [string, string][] | null {
   rows.push(["Points earned", `${b.pointsEarned} points`]);
   rows.push(["Points redeemed", `${used} points`]);
   if (b.pointsDiscount > 0) rows.push(["Loyalty discount", rupee(b.pointsDiscount)]);
+  const gifts = b.items.filter((i) => i.free);
+  if (gifts.length) rows.push(["Free gift received", gifts.map((g) => `${g.qty} × ${g.name}`).join(", ")]);
   if (b.loyaltyBalance !== null) rows.push(["Remaining balance", `${b.loyaltyBalance} points`]);
   return rows;
 }

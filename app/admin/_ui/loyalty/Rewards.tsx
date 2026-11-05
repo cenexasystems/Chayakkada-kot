@@ -5,7 +5,7 @@ import { rupee } from "@/lib/money";
 import type { Product } from "@/lib/types";
 import type { GiftOffer, LoyaltyState, Reward } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
-import { Badge, Btn, Card, Field, Modal, cx, inputLineCls } from "../kit";
+import { Badge, Btn, Card, Field, Modal, cx, downloadExcel, inputLineCls } from "../kit";
 
 const TXT = "text-[12.5px] text-slate-500";
 
@@ -32,8 +32,20 @@ export default function Rewards({ d }: { d: LoyaltyState }) {
   const toggleReward = (r: Reward) => act("loyalty.reward.save", { ...r, active: !r.active });
   const toggleOffer = (o: GiftOffer) => act("loyalty.offer.save", { ...o, active: !o.active });
 
+  const exportAll = () =>
+    downloadExcel(`free-gifts-and-rewards-${new Date().toISOString().slice(0, 10)}`, [
+      { name: "Points gifts", rows: [["Reward", "Gift", "Quantity", "Points needed", "Most per customer", "Most in total", "Claimed so far", "Valid from", "Valid until", "Active"], ...points.map((r) => [r.name, nameOf(r.productId), r.giftQty, r.pointsCost, r.perCustomerLimit ?? "", r.maxRedemptions ?? "", r.redeemed, r.startsOn ?? "", r.endsOn ?? "", r.active ? "Yes" : "No"])] },
+      { name: "Spending rewards", rows: [["Reward", "Gift", "Quantity", "Spending that unlocks it (₹)", "Most per customer", "Most in total", "Claimed so far", "Valid from", "Valid until", "Active"], ...spend.map((r) => [r.name, nameOf(r.productId), r.giftQty, r.milestoneAmount, r.perCustomerLimit ?? "", r.maxRedemptions ?? "", r.redeemed, r.startsOn ?? "", r.endsOn ?? "", r.active ? "Yes" : "No"])] },
+      { name: "Bill offers", rows: [["Offer", "Applies when", "Minimum bill (₹)", "Item to buy", "Quantity to buy", "Gift", "Gift quantity", "Repeats on one bill", "Who", "Most in total", "Given so far", "Valid from", "Valid until", "Active"], ...d.offers.map((o) => [o.name, o.type === "spend" ? "Bill reaches an amount" : "Customer buys an item", o.minBill, nameOf(o.productId), o.buyQty, nameOf(o.giftProductId), o.giftQty, o.repeatable ? "Yes" : "No", o.audience === "members" ? "Loyalty customers only" : "Everyone", o.maxTotal ?? "", o.given, o.startsOn ?? "", o.endsOn ?? "", o.active ? "Yes" : "No"])] },
+    ]);
+
   return (
     <div className="space-y-5">
+      <div className="flex justify-end">
+        <Btn icon="download" onClick={exportAll}>
+          Excel
+        </Btn>
+      </div>
       <p className="rounded-xl bg-slate-50 px-4 py-3 text-[13px] leading-relaxed text-slate-600">
         A free gift is always an item from your menu. When it is given, it shows on the bill as a <b>FREE GIFT ₹0</b> line and comes off the normal stock — and shows in the Stock movement log.
       </p>

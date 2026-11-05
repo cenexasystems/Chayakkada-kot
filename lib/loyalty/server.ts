@@ -963,7 +963,7 @@ async function mismatches(q: Q): Promise<string[]> {
 export async function loyaltyState(): Promise<LoyaltyState> {
   const q = db;
   const cfg = await getConfig(q);
-  const [customers, rewards, offers, vouchers, auditRows, messages, totalRows, giftRows, spendRows, mism, soon] = await Promise.all([
+  const [customers, rewards, offers, vouchers, auditRows, messages, totalRows, giftRows, spendRows, mism, soon, monthRows] = await Promise.all([
     q.select().from(loyaltyCustomers).orderBy(desc(loyaltyCustomers.createdAt)),
     q.select().from(loyaltyRewards).orderBy(desc(loyaltyRewards.createdAt)),
     q.select().from(giftOffers).orderBy(desc(giftOffers.createdAt)),
@@ -983,6 +983,11 @@ export async function loyaltyState(): Promise<LoyaltyState> {
       .from(loyaltyLots)
       .where(and(gt(loyaltyLots.remaining, 0), isNotNull(loyaltyLots.expiresAt), gte(loyaltyLots.expiresAt, Date.now()), lte(loyaltyLots.expiresAt, Date.now() + cfg.expiry.warnDays * DAY)))
       .groupBy(loyaltyLots.customerId),
+    q.execute(sql`
+      select to_char(to_timestamp(created_at / 1000) at time zone 'Asia/Kolkata', 'YYYY-MM') m,
+        coalesce(sum(points) filter (where type in ('purchase','bonus','promo','referral','occasion')), 0)::int earned,
+        coalesce(-sum(points) filter (where type in ('redemption','reward')), 0)::int redeemed
+      from ${loyaltyLedger} group by 1 order by 1`),
   ]);
   const byPhoneId = new Map(customers.map((c) => [c.phone, c.id]));
   const spend: Record<string, number> = {};
@@ -1012,6 +1017,7 @@ export async function loyaltyState(): Promise<LoyaltyState> {
     rewardSpend,
     totals: { earned: t.earned, redeemed: t.redeemed, outstanding: customers.reduce((a, c) => a + c.available, 0), giftsGiven: Number((giftRows.rows[0] as { n: number } | undefined)?.n ?? 0) },
     mismatched: mism,
+    months: (monthRows.rows as { m: string; earned: number; redeemed: number }[]).map((r) => ({ month: r.m, earned: r.earned, redeemed: r.redeemed })),
     expiring: Object.fromEntries(soon.map((r) => [r.customerId, { points: Number(r.points), expiresAt: Number(r.expiresAt) }])),
   };
 }

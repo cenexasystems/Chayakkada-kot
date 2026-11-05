@@ -7,7 +7,7 @@ import type { Bill } from "@/lib/types";
 import type { LedgerEntry, LoyaltyCustomer, LoyaltyMessage, LoyaltyState } from "@/lib/loyalty/types";
 import { useAdmin } from "../Store";
 import { Badge, Btn, Empty, Field, Modal, SearchBox, cx, downloadExcel, fmtDate, fmtDateTime, inputLineCls } from "../kit";
-import { MessageList, MessageModal } from "./notify";
+import { MSG_LABEL, MessageList, MessageModal } from "./notify";
 import { LEDGER_LABEL, Pager, Stat, th, td, tableWrap, usePaged } from "./shared";
 
 const sel = "h-10 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700 outline-none focus:border-slate-400";
@@ -227,13 +227,29 @@ function Profile({ c, d, bills, reload, onClose }: { c: LoyaltyCustomer; d: Loya
     }
   };
 
+  const exportCustomer = () =>
+    downloadExcel(`${c.name.replace(/[^\w]+/g, "-")}-loyalty-${new Date().toISOString().slice(0, 10)}`, [
+      { name: "Customer", rows: [["Name", c.name], ["Mobile", c.phone], ["WhatsApp", c.whatsapp || c.phone], ["WhatsApp consent", c.consent ? "Yes" : "No"], ["Status", c.status === "active" ? "Active" : "Deactivated"], ["Joined", fmtDate(c.createdAt)], ["Available points", c.available], ["Points earned", c.lifetime], ["Points redeemed", c.redeemed], ["Total purchases (₹)", totalSpend]] },
+      { name: "Points history", rows: [["When", "Type", "Points before", "Change", "Points after", "Bill", "Note"], ...(ledger ?? []).map((e) => [fmtDateTime(e.createdAt), LEDGER_LABEL[e.type] ?? e.type, e.balanceBefore, e.points, e.balanceAfter, e.invoiceNo ?? "", e.description])] },
+      { name: "Rewards", rows: [["Reward", "Status", "Earned", "Claimed", "Bill", "Points used"], ...vouchers.map((v) => [v.name, v.status === "used" ? "Claimed" : v.status === "issued" ? "Unlocked" : v.status === "cancelled" ? "Cancelled" : "Expired", fmtDate(v.issuedAt), v.usedAt ? fmtDate(v.usedAt) : "", v.invoiceNo ?? "", v.pointsCost])] },
+      { name: "Purchases", rows: [["Bill", "Date", "Eligible purchase (₹)", "Points earned", "Points redeemed", "Free gift"], ...gotBills.map((b) => [b.invoiceNo, fmtDate(b.createdAt), Math.max(0, b.subtotal - b.discount), b.pointsEarned, b.pointsRedeemed, b.items.filter((i) => i.free).map((i) => `${i.qty} × ${i.name}`).join(", ")])] },
+      { name: "WhatsApp messages", rows: [["When", "Message", "Status", "Text"], ...messages.map((m) => [fmtDateTime(m.createdAt), MSG_LABEL[m.type] ?? m.type, m.status === "opened" ? "Opened in WhatsApp" : m.status === "failed" ? "Failed" : "Ready to send", m.text])] },
+    ]);
+
   return (
     <Modal
       open
       onClose={onClose}
       wide
       title={c.name}
-      footer={<Btn onClick={onClose}>Close</Btn>}
+      footer={
+        <>
+          <Btn icon="download" onClick={exportCustomer}>
+            Excel
+          </Btn>
+          <Btn onClick={onClose}>Close</Btn>
+        </>
+      }
     >
       <div className="space-y-6">
         {/* details */}
