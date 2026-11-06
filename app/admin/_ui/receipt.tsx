@@ -87,8 +87,18 @@ function Sheet({ b, shop, logo, details, size }: { b: Bill; shop: string; logo?:
     <div className={`inv inv--${size.toLowerCase()}`}>
       <header className="inv__head">
         <div className="inv__brand">
-          {logo && <img src={logo} alt="" style={{ height: 56, width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: 6, display: "block" }} />}
-          <h1>{shop}</h1>
+          {!logo || logo === "/logo.png" ? (
+            <>
+              {/* the shop's own 8:2 + CHAYAKKADA logo is the whole header mark on an invoice */}
+              <img src="/invoice-logo.png" alt={shop} style={{ height: "7.4em", width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: 6, display: "block" }} />
+              <h1 style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{shop}</h1>
+            </>
+          ) : (
+            <>
+              <img src={logo} alt="" style={{ height: 56, width: "auto", maxWidth: "100%", objectFit: "contain", marginBottom: 6, display: "block" }} />
+              <h1>{shop}</h1>
+            </>
+          )}
           {addr && <p>{addr}</p>}
           {contact && <p>{contact}</p>}
         </div>
