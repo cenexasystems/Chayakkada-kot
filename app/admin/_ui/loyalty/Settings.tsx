@@ -323,34 +323,24 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
       {/* customer groups */}
       <Card title="Customer groups (CRM)">
         <p className={cx(note, "mb-3")}>Every loyalty customer is put in a group from their paid bills — shown in the Customer CRM tab. These numbers decide where the lines fall.</p>
-        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="“New” for the first (days)">
-            <input type="number" min={1} className={small} value={c.crm.newDays} onChange={(e) => set("crm", { newDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
-          </Field>
-          <Field label="“Regular” from (visits)">
-            <input type="number" min={1} className={small} value={c.crm.regularVisits} onChange={(e) => set("crm", { regularVisits: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
-          </Field>
-          <Field label="“Frequent” from (visits)">
-            <input type="number" min={1} className={small} value={c.crm.frequentVisits} onChange={(e) => set("crm", { frequentVisits: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
-          </Field>
-          <Field label="…counted over the last (days)">
-            <input type="number" min={1} className={small} value={c.crm.frequentDays} onChange={(e) => set("crm", { frequentDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
-          </Field>
-          <Field label="“High value” from spending (₹)">
-            <input type="number" min={0} className={small} value={c.crm.highValue} onChange={(e) => set("crm", { highValue: Math.max(0, Number(e.target.value) || 0) })} />
-          </Field>
-          <Field label="“VIP” from spending (₹)">
-            <input type="number" min={0} className={small} value={c.crm.vipSpend} onChange={(e) => set("crm", { vipSpend: Math.max(0, Number(e.target.value) || 0) })} />
-          </Field>
-          <Field label="“At risk” after (days away)">
-            <input type="number" min={1} className={small} value={c.crm.atRiskDays} onChange={(e) => set("crm", { atRiskDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
-          </Field>
-          <Field label="“Inactive” after (days away)">
-            <input type="number" min={1} className={small} value={c.crm.inactiveDays} onChange={(e) => set("crm", { inactiveDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
-          </Field>
-          <Field label="“Lost” after (days away)">
-            <input type="number" min={1} className={small} value={c.crm.lostDays} onChange={(e) => set("crm", { lostDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
-          </Field>
+        <div className="divide-y divide-slate-100">
+          {(
+            [
+              ["New customers", [["“New” for the first (days)", "newDays", 1]]],
+              ["Visits", [["“Regular” from (visits)", "regularVisits", 1], ["“Frequent” from (visits)", "frequentVisits", 1], ["…counted over the last (days)", "frequentDays", 1]]],
+              ["Spending", [["“High value” from spending (₹)", "highValue", 0], ["“VIP” from spending (₹)", "vipSpend", 0]]],
+              ["Time away", [["“At risk” after (days away)", "atRiskDays", 1], ["“Inactive” after (days away)", "inactiveDays", 1], ["“Lost” after (days away)", "lostDays", 1]]],
+            ] as [string, [string, keyof LoyaltyConfig["crm"], number][]][]
+          ).map(([group, fields]) => (
+            <div key={group} className="grid gap-x-6 gap-y-3 py-3.5 first:pt-0 last:pb-0 sm:grid-cols-[120px_repeat(3,minmax(0,1fr))] sm:items-start">
+              <b className="pt-1 text-[12.5px] text-slate-900">{group}</b>
+              {fields.map(([label, key, min]) => (
+                <Field key={key} label={label}>
+                  <input type="number" min={min} className={small} value={c.crm[key]} onChange={(e) => set("crm", { [key]: Math.max(min, Math.floor(Number(e.target.value) || min)) })} />
+                </Field>
+              ))}
+            </div>
+          ))}
         </div>
         {crmProblems.length > 0 && (
           <ul className="mt-3 space-y-1 rounded-xl bg-amber-50 px-3.5 py-2.5 text-[12.5px] font-semibold text-amber-800">
