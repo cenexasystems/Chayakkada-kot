@@ -52,7 +52,7 @@ function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
   );
 }
 
-const note = "text-[12.5px] leading-relaxed text-slate-500";
+const note = "max-w-2xl text-[12.5px] leading-relaxed text-slate-500";
 const small = "h-9 w-full max-w-[104px] rounded-lg border border-slate-200 bg-white px-2.5 text-right text-[13px] text-slate-900 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
 
 export default function SettingsTab({ d }: { d: LoyaltyState }) {
@@ -266,7 +266,7 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
         <div className="mt-4 rounded-xl border border-slate-100 p-3.5">
           <b className="text-[13px] text-slate-900">Can points be used on a bill that also has…</b>
           <p className={cx(note, "mb-2")}>Switch off to stop customers combining points with another saving. If a bill has it, the points are not applied and Billing tells the cashier why.</p>
-          <div className="space-y-2.5">
+          <div className="max-w-lg space-y-2">
             <Rule on={c.redeem.withCoupon} onChange={(v) => set("redeem", { withCoupon: v })} title="a coupon discount" />
             <Rule on={c.redeem.withManual} onChange={(v) => set("redeem", { withManual: v })} title="a manual discount typed at billing" />
             <Rule on={c.redeem.withReward} onChange={(v) => set("redeem", { withReward: v })} title="a free-gift reward being claimed" />
@@ -363,7 +363,7 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
 
       {/* billing and receipts */}
       <Card title="Billing &amp; receipts">
-        <div className="space-y-2.5">
+        <div className="max-w-2xl space-y-2.5">
           <label className="flex items-start gap-2.5 text-[13px] text-slate-700">
             <input type="checkbox" className="mt-0.5" checked={c.display.receiptSummary} onChange={(e) => set("display", { receiptSummary: e.target.checked })} />
             <span>
