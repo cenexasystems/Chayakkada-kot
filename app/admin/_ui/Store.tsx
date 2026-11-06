@@ -348,8 +348,22 @@ export function AdminProvider({ initial, role, children }: { initial: AdminState
   }, []);
   useEffect(() => {
     if (!printTick) return;
-    const r = requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
-    return () => cancelAnimationFrame(r);
+    let cancelled = false;
+    // the logo is a picture that may not have loaded yet when the bill first appears — wait for it, or it prints blank
+    const r = requestAnimationFrame(() =>
+      requestAnimationFrame(async () => {
+        const imgs = [...document.querySelectorAll<HTMLImageElement>(".adm-print img")];
+        await Promise.race([
+          Promise.all(imgs.map((im) => (im.complete ? Promise.resolve() : new Promise((ok) => { im.onload = im.onerror = () => ok(null); })))),
+          new Promise((ok) => setTimeout(ok, 4000)),
+        ]);
+        if (!cancelled) window.print();
+      }),
+    );
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(r);
+    };
   }, [printTick]);
 
   /* ---------- derived floor: every open tab, oldest first ---------- */
