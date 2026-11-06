@@ -282,8 +282,19 @@ function Sheet({ b, shop, logo, details, size }: { b: Bill; shop: string; logo?:
 function Thermal({ b, shop, logo, lines, roll }: { b: Bill; shop: string; logo?: string; lines: string[]; roll: 2 | 3 }) {
   return (
     <div className={`rcpt rcpt--${roll}`} style={{ width: `${ROLL_MM[roll][1]}mm` }}>
-      {logo && <img src={logo} alt="" style={{ height: 44, width: "auto", maxWidth: "100%", objectFit: "contain", margin: "0 auto 4px", display: "block" }} />}
-      <h1>{shop}</h1>
+      {!logo || logo === "/logo.png" ? (
+        <>
+          {/* the 8:2 + CHAYAKKADA logo, in pure black and white so a thermal printer prints it sharply */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/invoice-logo-bw.png" alt={shop} style={{ width: "100%", height: "auto", margin: "0 auto 4px", display: "block", imageRendering: "pixelated" }} />
+          <h1 style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{shop}</h1>
+        </>
+      ) : (
+        <>
+          <img src={logo} alt="" style={{ height: 44, width: "auto", maxWidth: "100%", objectFit: "contain", margin: "0 auto 4px", display: "block" }} />
+          <h1>{shop}</h1>
+        </>
+      )}
       {lines.map((l, i) => <p className="c" key={i}>{l}</p>)}
       <hr />
       {b.isGst && <p className="c">TAX INVOICE</p>}
