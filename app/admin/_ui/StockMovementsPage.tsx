@@ -23,6 +23,45 @@ const th = "px-4 py-3 text-left text-[10.5px] font-bold uppercase tracking-[0.12
 const td = "px-4 py-3 text-[13px]";
 const SIZE = 20;
 
+/** The reason for a movement, laid out so it reads at a glance. A free gift's note ("FREE GIFT / LOYALTY REWARD · offer · customer
+    · by staff") is split into labelled lines; other notes stay as the plain sentence. The bill / order reference sits under it. */
+function Reason({ m }: { m: { type: string; note: string; ref: string } }) {
+  if (m.type === "gift") {
+    const parts = m.note.split(" · ").map((x) => x.trim()).filter(Boolean);
+    const [, offer, customer, by, ...rest] = parts;
+    return (
+      <div className="space-y-0.5 text-[12.5px] leading-snug">
+        {offer && (
+          <p>
+            <span className="text-slate-400">Reward / offer · </span>
+            <b className="font-semibold text-slate-800">{offer}</b>
+          </p>
+        )}
+        {customer && (
+          <p>
+            <span className="text-slate-400">Customer · </span>
+            <span className="text-slate-700">{customer}</span>
+          </p>
+        )}
+        {by && (
+          <p>
+            <span className="text-slate-400">Staff · </span>
+            <span className="text-slate-700">{by.replace(/^by\s+/i, "")}</span>
+          </p>
+        )}
+        {rest.length > 0 && <p className="text-[11.5px] italic text-slate-400">{rest.join(" · ")}</p>}
+        {m.ref && <p className="font-mono text-[11.5px] text-slate-500">{m.ref}</p>}
+      </div>
+    );
+  }
+  return (
+    <div className="text-[12.5px] leading-snug text-slate-600">
+      {m.note || <span className="text-slate-300">—</span>}
+      {m.ref && <span className="mt-0.5 block font-mono text-[11.5px] text-slate-400">{m.ref}</span>}
+    </div>
+  );
+}
+
 export default function StockMovementsPage() {
   const { toast, s } = useAdmin();
   const [exporting, setExporting] = useState(false);
@@ -119,7 +158,7 @@ export default function StockMovementsPage() {
             ))}
           </select>
           <ItemSelect
-            className="!h-10 w-[210px] !rounded-full"
+            className="!h-10 !w-[210px] max-w-full !rounded-full"
             products={names.map((n) => ({ id: n.id, name: n.name, category: s.products.find((p) => p.id === n.id)?.category ?? "Removed items" }))}
             value={pid === "all" ? "" : pid}
             onChange={(v) => filter(setPid)(v || "all")}
@@ -140,7 +179,7 @@ export default function StockMovementsPage() {
         <Kpi label="Adjustments" value={`${st.adjusted > 0 ? "+" : ""}${st.adjusted}`} hint="Manual corrections" icon="sliders" tone="amber" />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_340px]">
         <Card title="Timeline">
           {!rows.length ? (
             <Empty icon="box" title={loading ? "Loading…" : needle || type !== "all" || pid !== "all" || period !== "all" ? "No movements match" : "No stock movements yet"}>
@@ -148,8 +187,34 @@ export default function StockMovementsPage() {
             </Empty>
           ) : (
             <>
-              <div className="overflow-x-auto adm-scroll">
-                <table className="w-full min-w-[680px]">
+              {/* phones: one card per movement */}
+              <ul className="space-y-2.5 md:hidden">
+                {rows.map((m) => (
+                  <li key={m.id} className="rounded-2xl border border-slate-100 bg-white p-3.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <b className="block truncate text-[14px] text-slate-900">{m.productName}</b>
+                        <span className="text-[11.5px] text-slate-500">{fmtDateTime(m.createdAt)}</span>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <b className={cx("block text-[17px] font-extrabold", m.qty > 0 ? "text-emerald-600" : "text-red-600")}>
+                          {m.qty > 0 ? "+" : ""}
+                          {m.qty}
+                        </b>
+                        <span className="text-[11.5px] text-slate-500">balance {m.balanceAfter}</span>
+                      </div>
+                    </div>
+                    <div className="mt-2">
+                      <Badge tone={TYPE[m.type][1]}>{TYPE[m.type][0]}</Badge>
+                    </div>
+                    <div className="mt-2 border-t border-slate-100 pt-2">
+                      <Reason m={m} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <div className="adm-scroll hidden overflow-x-auto md:block">
+                <table className="w-full min-w-[760px]">
                   <thead className="bg-slate-50">
                     <tr>
                       <th className={th}>When</th>
@@ -157,12 +222,12 @@ export default function StockMovementsPage() {
                       <th className={th}>Type</th>
                       <th className={cx(th, "text-right")}>Change</th>
                       <th className={cx(th, "text-right")}>Balance</th>
-                      <th className={th}>Reason</th>
+                      <th className={cx(th, "min-w-[260px]")}>Reason</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((m) => (
-                      <tr key={m.id} className="border-b border-slate-100 last:border-0">
+                      <tr key={m.id} className="border-b border-slate-100 align-top last:border-0">
                         <td className={cx(td, "whitespace-nowrap text-slate-600")}>{fmtDateTime(m.createdAt)}</td>
                         <td className={cx(td, "font-semibold text-slate-900")}>{m.productName}</td>
                         <td className={td}>
@@ -173,9 +238,8 @@ export default function StockMovementsPage() {
                           {m.qty}
                         </td>
                         <td className={cx(td, "text-right font-semibold text-slate-700")}>{m.balanceAfter}</td>
-                        <td className={cx(td, "text-slate-500")}>
-                          {m.note}
-                          {m.ref && <span className="block text-[11.5px] text-slate-400">{m.ref}</span>}
+                        <td className={td}>
+                          <Reason m={m} />
                         </td>
                       </tr>
                     ))}

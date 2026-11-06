@@ -23,7 +23,7 @@ export default function Rewards({ d }: { d: LoyaltyState }) {
   const on = d.config.gifts;
 
   const removeReward = async (r: Reward) => {
-    if (!(await confirm({ title: `Remove "${r.name}"?`, body: "Customers can no longer get it. If it has already been unlocked or claimed, it is switched off instead so the history stays.", ok: "Remove", danger: true }))) return;
+    if (!(await confirm({ title: `Remove "${r.name}"?`, body: "Customers can no longer get it. Gifts already claimed stay in the history; gifts unlocked but not yet handed over are cancelled.", ok: "Remove", danger: true }))) return;
     await act("loyalty.reward.delete", { id: r.id });
   };
   const removeOffer = async (o: GiftOffer) => {

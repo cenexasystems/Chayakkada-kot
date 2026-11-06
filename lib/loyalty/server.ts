@@ -897,12 +897,9 @@ export async function saveReward(tx: Tx, a: Args, actor: string) {
 export async function deleteReward(tx: Tx, a: Args, actor: string) {
   const r = await first(tx.select().from(loyaltyRewards).where(eq(loyaltyRewards.id, str(a.id, 40))));
   if (!r) throw new ApiError("Reward not found.", 404);
-  // a reward that's been unlocked or claimed stays for the history; it's just switched off
-  if (r.redeemed > 0 || (await first(tx.select({ id: loyaltyVouchers.id }).from(loyaltyVouchers).where(eq(loyaltyVouchers.rewardId, r.id))))) {
-    await tx.update(loyaltyRewards).set({ active: false, updatedAt: Date.now() }).where(eq(loyaltyRewards.id, r.id));
-    await audit(tx, actor, "reward.archive", { ref: r.name });
-    return { archived: true };
-  }
+  // Deleted for real. Past vouchers keep their own copy of the name, so the history stays; gifts still
+  // waiting to be handed over are cancelled because the reward no longer exists.
+  await tx.update(loyaltyVouchers).set({ status: "cancelled", key: null, note: "This reward was removed" }).where(and(eq(loyaltyVouchers.rewardId, r.id), eq(loyaltyVouchers.status, "issued")));
   await tx.delete(loyaltyRewards).where(eq(loyaltyRewards.id, r.id));
   await audit(tx, actor, "reward.delete", { ref: r.name, before: r });
   return { archived: false };

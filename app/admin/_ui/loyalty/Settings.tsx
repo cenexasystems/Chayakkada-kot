@@ -53,7 +53,7 @@ function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
 }
 
 const note = "text-[12.5px] leading-relaxed text-slate-500";
-const small = "h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-right text-[13.5px] text-slate-900 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
+const small = "h-10 w-full max-w-[170px] rounded-xl border border-slate-200 bg-white px-3 text-right text-[13.5px] text-slate-900 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
 
 export default function SettingsTab({ d }: { d: LoyaltyState }) {
   // the form starts again from the saved settings whenever they change (after Save)
@@ -323,7 +323,7 @@ function Form({ saved }: { saved: LoyaltyConfig }) {
       {/* customer groups */}
       <Card title="Customer groups (CRM)">
         <p className={cx(note, "mb-3")}>Every loyalty customer is put in a group from their paid bills — shown in the Customer CRM tab. These numbers decide where the lines fall.</p>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="“New” for the first (days)">
             <input type="number" min={1} className={small} value={c.crm.newDays} onChange={(e) => set("crm", { newDays: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
           </Field>
@@ -430,7 +430,7 @@ function ItemPicker({ products, picked, onChange, none }: { products: { id: stri
   const name = (id: string) => products.find((p) => p.id === id)?.name ?? "(removed item)";
   return (
     <div className="space-y-2">
-      <button type="button" onClick={() => setOpen(true)} className={cx(inputLineCls, "flex items-center justify-between text-left text-slate-500")} aria-label="Add an item">
+      <button type="button" onClick={() => setOpen(true)} className={cx(inputLineCls, "flex max-w-md items-center justify-between text-left text-slate-500")} aria-label="Add an item">
         Add an item…
         <span className="text-[12px] text-slate-400">choose a category, then the item</span>
       </button>
