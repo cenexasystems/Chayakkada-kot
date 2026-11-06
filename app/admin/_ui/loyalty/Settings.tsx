@@ -53,7 +53,7 @@ function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
 }
 
 const note = "text-[12.5px] leading-relaxed text-slate-500";
-const small = "h-10 w-full max-w-[170px] rounded-xl border border-slate-200 bg-white px-3 text-right text-[13.5px] text-slate-900 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
+const small = "h-9 w-full max-w-[104px] rounded-lg border border-slate-200 bg-white px-2.5 text-right text-[13px] text-slate-900 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100";
 
 export default function SettingsTab({ d }: { d: LoyaltyState }) {
   // the form starts again from the saved settings whenever they change (after Save)
