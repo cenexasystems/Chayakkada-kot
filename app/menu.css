@@ -1728,10 +1728,20 @@
 
 /* ---------- shop contact block + logo ---------- */
 .tm-logo {
-  width: 28px;
-  height: 28px;
+  height: 30px;
+  width: auto;
+  max-width: 80px;
+  padding: 3px 6px;
   border-radius: 8px;
-  object-fit: cover;
+  background: #f4f7e8;
+  object-fit: contain;
+}
+.tm-brand em {
+  font-family: var(--font-brand), var(--display);
+  font-style: normal;
+  font-weight: 400;
+  font-synthesis: none;
+  letter-spacing: 0.03em;
 }
 .tm-contact {
   display: grid;

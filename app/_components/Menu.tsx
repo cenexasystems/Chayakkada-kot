@@ -537,7 +537,7 @@ export default function Menu({ initial }: { initial: TabView }) {
       {/* ================= header ================= */}
       <header className="tm-top">
         <span className="tm-brand">
-          {view.details.logoUrl ? <img className="tm-logo" src={view.details.logoUrl} alt="" /> : <Cherry size={22} />}
+          {view.details.logoUrl && view.details.logoUrl !== "/logo.png" ? <img className="tm-logo" src={view.details.logoUrl} alt="" /> : <Cherry size={26} />}
           <em>{view.shopName}</em>
         </span>
         {tab ? (

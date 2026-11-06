@@ -1189,11 +1189,14 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         }
         if (a.logoUrl !== undefined && !(typeof a.logoUrl === "string" && a.logoUrl.startsWith("/shop-logo"))) {
           const v = typeof a.logoUrl === "string" ? a.logoUrl.trim() : "";
+          if (v === "/logo.png") patch.logoUrl = v; // the built-in 8:2 logo
+          else {
           const isUpload = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v);
           if (v && !isUpload && !/^https?:\/\/[^\s/]+/i.test(v)) throw new ApiError("Logo should be a PNG/JPG file or an http(s) link.");
           if (isUpload && v.length > 150_000) throw new ApiError("That logo image is too large — pick a smaller one.");
           if (!isUpload && v.length > 500) throw new ApiError("That logo link is too long.");
           patch.logoUrl = v;
+          }
         }
         for (const k of ["mapsUrl"] as const) {
           if (a[k] !== undefined) {

@@ -26,20 +26,17 @@ const NAV: Nav[] = [
   { href: "/admin/loyalty", label: "Loyalty", icon: "star", roles: ["admin", "staff"] },
 ];
 
+/* The shop logo. The built-in 8:2 mark is shown in beige straight on the dark sidebar; a logo uploaded in Settings
+   keeps a light tile behind it so it can be seen. */
 const Cherry = ({ logo }: { logo?: string }) =>
-  logo ? (
+  !logo || logo === "/logo.png" ? (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={logo} alt="" width={30} height={30} className="h-[30px] w-[30px] rounded-md object-cover" />
+    <img src="/logo.png" alt="" className="adm-logo-plain" />
   ) : (
-    <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
-      <path d="M4 14c0-6 5.4-10 12-10s12 4 12 10z" fill="#ffb81c" />
-      <circle cx="11" cy="9" r="1" fill="#fff6e3" />
-      <circle cx="16" cy="7" r="1" fill="#fff6e3" />
-      <circle cx="21" cy="9.5" r="1" fill="#fff6e3" />
-      <path d="M3 16.5c3 1.6 4 1.6 6.5 0s4 1.6 6.5 1.6 4-3.2 6.5-1.6 3.5 1.6 6.5 0v1.5H3z" fill="#7bc043" />
-      <rect x="4" y="19" width="24" height="3.5" rx="1.75" fill="#6b7550" />
-      <path d="M4 23.5h24v1.5a3.5 3.5 0 0 1-3.5 3.5h-17A3.5 3.5 0 0 1 4 25z" fill="#ffb81c" />
-    </svg>
+    <span className="adm-logo">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={logo} alt="" />
+    </span>
   );
 
 function Settings({ onClose }: { onClose: () => void }) {
@@ -135,7 +132,7 @@ function Settings({ onClose }: { onClose: () => void }) {
               <div className="flex items-center gap-3">
                 {form.logoUrl && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={form.logoUrl} alt="Logo preview" className="h-12 w-12 rounded-lg border border-slate-200 object-cover" />
+                  <img src={form.logoUrl} alt="Logo preview" className="h-12 w-auto max-w-[110px] rounded-lg border border-slate-200 bg-white object-contain p-1" />
                 )}
                 <label className="inline-flex h-10 cursor-pointer items-center rounded-xl border border-slate-200 bg-white px-3.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50">
                   Upload PNG / JPG
@@ -242,7 +239,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <Cherry logo={s.settings.logoUrl} />
         {!mini && (
           <span className="leading-tight">
-            <b className="block text-[19px]" style={{ fontFamily: "var(--font-display), Georgia, serif", fontWeight: 500 }}>
+            <b className="adm-wordmark block text-[17px]">
               {s.settings.shopName}
             </b>
             <small className="text-[10px] font-bold uppercase tracking-[0.18em]">{role === "admin" ? "Admin console" : "Staff console"}</small>
@@ -312,7 +309,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <button type="button" onClick={() => setMenu(true)} className="adm-link grid h-10 w-10 place-items-center rounded-xl" aria-label="Open menu">
             <Icon name="menu" size={20} />
           </button>
-          <b className="min-w-0 flex-1 truncate text-[16px]" style={{ fontFamily: "var(--font-display), Georgia, serif", fontWeight: 500 }}>
+          <b className="adm-wordmark min-w-0 flex-1 truncate text-[16px]">
             {s.settings.shopName} · {role === "admin" ? "Admin" : "Staff"}
           </b>
           {fresh > 0 && (

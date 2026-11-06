@@ -11,10 +11,11 @@ const FALLBACK = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><p
 // short cache, so a new logo shows up in the tab within a few minutes
 const CACHE = "public, max-age=300, stale-while-revalidate=3600";
 
-export async function GET() {
+export async function GET(req: Request) {
   const logo = await shopLogo().catch(() => "");
   const m = /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/.exec(logo);
   if (m) return new Response(Buffer.from(m[2], "base64"), { headers: { "Content-Type": m[1], "Cache-Control": CACHE } });
   if (/^https?:\/\//i.test(logo)) return Response.redirect(logo, 302);
-  return new Response(FALLBACK, { headers: { "Content-Type": "image/svg+xml", "Cache-Control": CACHE } });
+  void FALLBACK; // the built-in picture is now the 8:2 logo
+  return Response.redirect(new URL("/logo.png", req.url), 302);
 }

@@ -149,6 +149,40 @@ html:has(.adm) {
   letter-spacing: -0.01em;
   text-transform: uppercase;
 }
+/* the shop name beside the logo is set in the wordmark's own western face (only here) */
+.adm-wordmark {
+  font-family: var(--font-brand), var(--display);
+  font-weight: 400 !important;
+  font-synthesis: none;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+/* the 8:2 logo is dark green, so on the dark sidebar it sits on a light tile */
+.adm-logo-plain {
+  display: block;
+  flex-shrink: 0;
+  height: 34px;
+  width: auto;
+  max-width: 70px;
+  object-fit: contain;
+}
+.adm-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: #f4f7e8;
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.35);
+}
+.adm-logo img {
+  display: block;
+  height: 26px;
+  width: auto;
+  max-width: 64px;
+  object-fit: contain;
+}
 .adm-side__brand small {
   color: rgba(243, 244, 225, 0.42);
 }
