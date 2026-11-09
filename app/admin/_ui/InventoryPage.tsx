@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import type { AdminState, Product } from "@/lib/types";
 import { pointsPerUnit } from "@/lib/loyalty/engine";
 import { rupee } from "@/lib/money";
@@ -229,6 +229,7 @@ export default function InventoryPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [renameOf, setRenameOf] = useState<string | null>(null);
   const [renaming, setRenaming] = useState("");
+  const [openFam, setOpenFam] = useState<string[]>([]);
   const [move, setMove] = useState<{ p: Product; dir: "added" | "removed"; qty: string; note: string } | null>(null);
 
   /* categories in use, plus ones added from Manage categories that have no products yet */
@@ -257,6 +258,149 @@ export default function InventoryPage() {
       }, new Map<string, Product[]>())
       .values(),
   ].flat();
+
+  const groups = (() => {
+    const m = new Map<string, Product[]>();
+    for (const p of list) {
+      const k = p.family ? `f:${p.family.toLowerCase()}` : `p:${p.id}`;
+      m.set(k, [...(m.get(k) ?? []), p]);
+    }
+    return [...m.entries()].map(([key, items]) => ({ key, family: items[0].family, items }));
+  })();
+
+  const row = (p: Product, nested: boolean) => (
+                <tr key={p.id} className={cx("border-b border-slate-100 last:border-0 hover:bg-slate-50/50", !p.active && "opacity-60", nested && "bg-slate-50/40")}>
+                <td className={td}>
+                  <div className={cx("flex items-center gap-3", nested && "ml-6 border-l-2 border-violet-200 pl-3")}>
+                    {p.image ? <img src={thumb(p.image)} alt="" className="h-11 w-11 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 font-bold text-slate-400">{p.name[0]}</span>}
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-2 font-semibold text-slate-900">
+                        {p.name}
+                        {p.variant && <Badge tone="violet">Variant</Badge>}
+                      </p>
+                      <p className="mt-0.5 flex flex-wrap gap-1">
+                        {p.tags.map((t) => (
+                          <Badge key={t} tone={t === "bestseller" ? "amber" : "violet"}>
+                            {t}
+                          </Badge>
+                        ))}
+                        {p.stock !== null && p.stock <= 0 ? <Badge tone="red">Sold out</Badge> : p.stock !== null && p.stock <= p.lowAt ? <Badge tone="amber">Low</Badge> : null}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+                <td className={cx(td, "text-slate-600")}>{p.category}</td>
+                <td className={cx(td, "font-bold text-slate-900")}>{rupee(p.price)}</td>
+                <td className={td}>
+                  <StockCell p={p} />
+                </td>
+                <td className={td}>
+                  <Switch on={p.active} onChange={() => act("product.toggle", { id: p.id })} label={`${p.name} on the menu`} />
+                </td>
+                <td className={cx(td, "text-right")}>
+                  <span className="inline-flex gap-1">
+                    {p.stock !== null && (
+                      <Btn size="sm" kind="plain" icon="box" onClick={() => setMove({ p, dir: "added", qty: "", note: "" })}>
+                        Stock in/out
+                      </Btn>
+                    )}
+                    <Btn size="sm" kind="plain" icon="plus" onClick={() => addVariant(p)} title={`Add another variant of ${p.variant ? p.family : p.name}`}>
+                      Variant
+                    </Btn>
+                    <Btn size="sm" kind="plain" icon="edit" onClick={() => open(p)}>
+                      Edit
+                    </Btn>
+                    {role === "admin" && (
+                    <Btn
+                      size="sm"
+                      kind="plain"
+                      className="text-red-600 hover:bg-red-50"
+                      onClick={async () => {
+                        if (await confirm({ title: `Delete ${p.name}?`, body: "It disappears from the menu and catalog, and its stock movement history is deleted too. Past orders and bills keep their copy of what was sold. To hide it for a while, switch “On menu” off instead.", ok: "Delete", danger: true }))
+                          act("product.delete", { id: p.id });
+                      }}
+                      aria-label={`Delete ${p.name}`}
+                    >
+                      <Icon name="trash" size={14} />
+                    </Btn>
+                    )}
+                  </span>
+                </td>
+              </tr>
+  );
+
+  /** one variant, in full: everything it has of its own */
+  const variantCard = (v: Product) => {
+    const pts = pointsPerUnit({ id: v.id, category: v.category, price: v.price, loyaltyPoints: v.loyaltyPoints }, s.loyaltyEarn);
+    const soldOut = v.stock !== null && v.stock <= 0;
+    const lowNow = v.stock !== null && v.stock > 0 && v.stock <= v.lowAt;
+    const lab = "text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-400";
+    return (
+      <div key={v.id} className={cx("rounded-2xl border border-slate-200 bg-white p-4", !v.active && "opacity-70")}>
+        <div className="flex gap-3">
+          {v.image ? <img src={thumb(v.image)} alt="" className="h-16 w-16 shrink-0 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-slate-100 text-lg font-bold text-slate-400">{v.variant[0]}</span>}
+          <div className="min-w-0 flex-1">
+            <p className="flex flex-wrap items-center gap-2 text-[15px] font-bold text-slate-900">
+              {v.variant}
+              {soldOut ? <Badge tone="red">Sold out</Badge> : lowNow ? <Badge tone="amber">Low</Badge> : null}
+              {v.tags.map((tg) => (
+                <Badge key={tg} tone={tg === "bestseller" ? "amber" : "violet"}>
+                  {tg}
+                </Badge>
+              ))}
+            </p>
+            <p className="mt-0.5 line-clamp-2 text-[12px] text-slate-500">{v.description || "No description"}</p>
+          </div>
+          <Switch on={v.active} onChange={() => act("product.toggle", { id: v.id })} label={`${v.name} on the menu`} />
+        </div>
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+          <div>
+            <dt className={lab}>Price</dt>
+            <dd className="text-[14px] font-bold text-slate-900">{rupee(v.price)}</dd>
+          </div>
+          <div>
+            <dt className={lab}>Stock</dt>
+            <dd>
+              <StockCell p={v} />
+            </dd>
+          </div>
+          <div>
+            <dt className={lab}>Low-stock alert</dt>
+            <dd className="text-[13px] text-slate-800">{v.stock === null ? "Not tracked" : `at ${v.lowAt} or less`}</dd>
+          </div>
+          <div>
+            <dt className={lab}>Loyalty points</dt>
+            <dd className="text-[13px] text-slate-800">
+              {pts} each{v.loyaltyPoints === null && <span className="text-slate-400"> (automatic)</span>}
+            </dd>
+          </div>
+        </dl>
+        <div className="mt-3 flex flex-wrap justify-end gap-1 border-t border-slate-100 pt-3">
+          {v.stock !== null && (
+            <Btn size="sm" kind="plain" icon="box" onClick={() => setMove({ p: v, dir: "added", qty: "", note: "" })}>
+              Stock in/out
+            </Btn>
+          )}
+          <Btn size="sm" kind="plain" icon="edit" onClick={() => open(v)}>
+            Edit
+          </Btn>
+          {role === "admin" && (
+            <Btn
+              size="sm"
+              kind="plain"
+              className="text-red-600 hover:bg-red-50"
+              onClick={async () => {
+                if (await confirm({ title: `Delete ${v.name}?`, body: "Its stock movement history is deleted too. Past orders and bills keep their copy of what was sold.", ok: "Delete", danger: true })) act("product.delete", { id: v.id });
+              }}
+              aria-label={`Delete ${v.name}`}
+            >
+              <Icon name="trash" size={14} />
+            </Btn>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const open = (p?: Product) => {
     setCatEdit(null);
@@ -482,66 +626,53 @@ export default function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {list.map((p) => (
-                <tr key={p.id} className={cx("border-b border-slate-100 last:border-0 hover:bg-slate-50/50", !p.active && "opacity-60")}>
-                  <td className={td}>
-                    <div className="flex items-center gap-3">
-                      {p.image ? <img src={thumb(p.image)} alt="" className="h-11 w-11 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 font-bold text-slate-400">{p.name[0]}</span>}
-                      <div className="min-w-0">
-                        <p className="flex items-center gap-2 font-semibold text-slate-900">
-                          {p.name}
-                          {p.variant && <Badge tone="violet">Variant</Badge>}
-                        </p>
-                        <p className="mt-0.5 flex flex-wrap gap-1">
-                          {p.tags.map((t) => (
-                            <Badge key={t} tone={t === "bestseller" ? "amber" : "violet"}>
-                              {t}
-                            </Badge>
-                          ))}
-                          {p.stock !== null && p.stock <= 0 ? <Badge tone="red">Sold out</Badge> : p.stock !== null && p.stock <= p.lowAt ? <Badge tone="amber">Low</Badge> : null}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className={cx(td, "text-slate-600")}>{p.category}</td>
-                  <td className={cx(td, "font-bold text-slate-900")}>{rupee(p.price)}</td>
-                  <td className={td}>
-                    <StockCell p={p} />
-                  </td>
-                  <td className={td}>
-                    <Switch on={p.active} onChange={() => act("product.toggle", { id: p.id })} label={`${p.name} on the menu`} />
-                  </td>
-                  <td className={cx(td, "text-right")}>
-                    <span className="inline-flex gap-1">
-                      {p.stock !== null && (
-                        <Btn size="sm" kind="plain" icon="box" onClick={() => setMove({ p, dir: "added", qty: "", note: "" })}>
-                          Stock in/out
+              {groups.map((g) => {
+                if (!g.family) return row(g.items[0], false);
+                const first = g.items[0];
+                const isOpen = openFam.includes(g.key) || !!q;
+                const prices = g.items.map((v) => v.price);
+                const tracked = g.items.filter((v) => v.stock !== null);
+                const lowCount = tracked.filter((v) => v.stock! > 0 && v.stock! <= v.lowAt).length;
+                const outCount = tracked.filter((v) => v.stock! <= 0).length;
+                return (
+                  <Fragment key={g.key}>
+                    <tr className="cursor-pointer border-b border-slate-100 bg-slate-50 hover:bg-slate-100/70" onClick={() => setOpenFam(isOpen ? openFam.filter((k) => k !== g.key) : [...openFam, g.key])} aria-expanded={isOpen}>
+                      <td className={td}>
+                        <div className="flex items-center gap-3">
+                          <Icon name="chevron" size={15} className={cx("shrink-0 text-slate-400 transition-transform", isOpen && "rotate-90")} />
+                          {first.image ? <img src={thumb(first.image)} alt="" className="h-11 w-11 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 font-bold text-slate-400">{g.family[0]}</span>}
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-900">{g.family}</p>
+                            <p className="mt-0.5 text-[11.5px] text-slate-500">{g.items.length} variant{g.items.length === 1 ? "" : "s"}: {g.items.map((v) => v.variant).join(", ")}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className={cx(td, "text-slate-600")}>{first.category}</td>
+                      <td className={cx(td, "font-bold text-slate-900")}>{Math.min(...prices) === Math.max(...prices) ? rupee(prices[0]) : `${rupee(Math.min(...prices))} – ${rupee(Math.max(...prices))}`}</td>
+                      <td className={td}>
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          {tracked.length > 0 && <b className="text-slate-900">{tracked.reduce((n, v) => n + v.stock!, 0)} in all</b>}
+                          {outCount > 0 && <Badge tone="red">{outCount} sold out</Badge>}
+                          {lowCount > 0 && <Badge tone="amber">{lowCount} low</Badge>}
+                        </span>
+                      </td>
+                      <td className={td} />
+                      <td className={cx(td, "text-right")}>
+                        <Btn size="sm" kind="plain" icon="plus" onClick={(e) => (e.stopPropagation(), addVariant(first))}>
+                          Add variant
                         </Btn>
-                      )}
-                      <Btn size="sm" kind="plain" icon="plus" onClick={() => addVariant(p)} title={`Add another variant of ${p.variant ? p.family : p.name}`}>
-                        Variant
-                      </Btn>
-                      <Btn size="sm" kind="plain" icon="edit" onClick={() => open(p)}>
-                        Edit
-                      </Btn>
-                      {role === "admin" && (
-                      <Btn
-                        size="sm"
-                        kind="plain"
-                        className="text-red-600 hover:bg-red-50"
-                        onClick={async () => {
-                          if (await confirm({ title: `Delete ${p.name}?`, body: "It disappears from the menu and catalog, and its stock movement history is deleted too. Past orders and bills keep their copy of what was sold. To hide it for a while, switch “On menu” off instead.", ok: "Delete", danger: true }))
-                            act("product.delete", { id: p.id });
-                        }}
-                        aria-label={`Delete ${p.name}`}
-                      >
-                        <Icon name="trash" size={14} />
-                      </Btn>
-                      )}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="border-b border-slate-100">
+                        <td colSpan={6} className="bg-white px-4 pb-4 pt-2">
+                          <div className="grid gap-3 lg:grid-cols-2">{g.items.map((v) => variantCard(v))}</div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
           {!list.length && (
