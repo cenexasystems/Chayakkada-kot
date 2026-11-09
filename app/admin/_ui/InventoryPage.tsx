@@ -284,12 +284,11 @@ export default function InventoryPage() {
   const row = (p: Product, nested: boolean) => (
                 <tr key={p.id} className={cx("border-b border-slate-100 last:border-0 hover:bg-slate-50/50", !p.active && "opacity-60", nested && "bg-slate-50/40")}>
                 <td className={td}>
-                  <div className={cx("flex items-center gap-3", nested && "ml-6 border-l-2 border-violet-200 pl-3")}>
+                  <div className={cx("flex items-center gap-3", nested && "ml-6")}>
                     {p.image ? <img src={thumb(p.image)} alt="" className="h-11 w-11 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 font-bold text-slate-400">{p.name[0]}</span>}
                     <div className="min-w-0">
                       <p className="flex items-center gap-2 font-semibold text-slate-900">
-                        {p.name}
-                        {p.variant && <Badge tone="violet">Variant</Badge>}
+                        {nested && p.variant ? p.variant : p.name}
                       </p>
                       <p className="mt-0.5 flex flex-wrap gap-1">
                         {p.tags.map((t) => (
@@ -338,85 +337,6 @@ export default function InventoryPage() {
                 </td>
               </tr>
   );
-
-  /** one variant, in full: everything it has of its own */
-  const variantCard = (v: Product) => {
-    const stray = !v.variant; // a plain "Tea" left beside Tea (Masala)… — it is no longer sold on its own
-    const pts = pointsPerUnit({ id: v.id, category: v.category, price: v.price, loyaltyPoints: v.loyaltyPoints }, s.loyaltyEarn);
-    const soldOut = v.stock !== null && v.stock <= 0;
-    const lowNow = v.stock !== null && v.stock > 0 && v.stock <= v.lowAt;
-    const lab = "text-[10.5px] font-bold uppercase tracking-[0.1em] text-slate-400";
-    return (
-      <div key={v.id} className={cx("rounded-2xl border border-slate-200 bg-white p-4", !v.active && "opacity-70")}>
-        <div className="flex gap-3">
-          {v.image ? <img src={thumb(v.image)} alt="" className="h-16 w-16 shrink-0 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-slate-100 text-lg font-bold text-slate-400">{(v.variant || v.name)[0]}</span>}
-          <div className="min-w-0 flex-1">
-            <p className="flex flex-wrap items-center gap-2 text-[15px] font-bold text-slate-900">
-              {v.variant || "Standard"}
-              {soldOut ? <Badge tone="red">Sold out</Badge> : lowNow ? <Badge tone="amber">Low</Badge> : null}
-              {v.tags.map((tg) => (
-                <Badge key={tg} tone={tg === "bestseller" ? "amber" : "violet"}>
-                  {tg}
-                </Badge>
-              ))}
-            </p>
-            <p className="mt-0.5 line-clamp-2 text-[12px] text-slate-500">{v.description || "No description"}</p>
-          </div>
-          <Switch on={v.active} onChange={() => act("product.toggle", { id: v.id })} label={`${v.name} on the menu`} />
-        </div>
-        {stray && (
-          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-800">
-            This plain “{v.name}” is not sold any more — billing and the menu show only the variants. Edit it to give it a variant name (it becomes “{v.name} (…)”), or delete it.
-          </p>
-        )}
-        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-          <div>
-            <dt className={lab}>Price</dt>
-            <dd className="text-[14px] font-bold text-slate-900">{rupee(v.price)}</dd>
-          </div>
-          <div>
-            <dt className={lab}>Stock</dt>
-            <dd>
-              <StockCell p={v} />
-            </dd>
-          </div>
-          <div>
-            <dt className={lab}>Low-stock alert</dt>
-            <dd className="text-[13px] text-slate-800">{v.stock === null ? "Not tracked" : `at ${v.lowAt} or less`}</dd>
-          </div>
-          <div>
-            <dt className={lab}>Loyalty points</dt>
-            <dd className="text-[13px] text-slate-800">
-              {pts} each{v.loyaltyPoints === null && <span className="text-slate-400"> (automatic)</span>}
-            </dd>
-          </div>
-        </dl>
-        <div className="mt-3 flex flex-wrap justify-end gap-1 border-t border-slate-100 pt-3">
-          {v.stock !== null && (
-            <Btn size="sm" kind="plain" icon="box" onClick={() => setMove({ p: v, dir: "added", qty: "", note: "" })}>
-              Stock in/out
-            </Btn>
-          )}
-          <Btn size="sm" kind="plain" icon="edit" onClick={() => open(v)}>
-            Edit
-          </Btn>
-          {role === "admin" && (
-            <Btn
-              size="sm"
-              kind="plain"
-              className="text-red-600 hover:bg-red-50"
-              onClick={async () => {
-                if (await confirm({ title: `Delete ${v.name}?`, body: "Its stock movement history is deleted too. Past orders and bills keep their copy of what was sold.", ok: "Delete", danger: true })) act("product.delete", { id: v.id });
-              }}
-              aria-label={`Delete ${v.name}`}
-            >
-              <Icon name="trash" size={14} />
-            </Btn>
-          )}
-        </div>
-      </div>
-    );
-  };
 
   const open = (p?: Product) => {
     setCatEdit(null);
@@ -692,8 +612,10 @@ export default function InventoryPage() {
                           <Icon name="chevron" size={15} className={cx("shrink-0 text-slate-400 transition-transform", isOpen && "rotate-90")} />
                           {first.image ? <img src={thumb(first.image)} alt="" className="h-11 w-11 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 font-bold text-slate-400">{g.family[0]}</span>}
                           <div className="min-w-0">
-                            <p className="font-bold text-slate-900">{g.family}</p>
-                            <p className="mt-0.5 text-[11.5px] text-slate-500">{g.items.length} variant{g.items.length === 1 ? "" : "s"}: {g.items.map((v) => v.variant || "Standard").join(", ")}</p>
+                            <p className="font-semibold text-slate-900">{g.family}</p>
+                            <p className="mt-0.5">
+                              <Badge tone="sky">{g.items.length} variant{g.items.length === 1 ? "" : "s"}</Badge>
+                            </p>
                           </div>
                         </div>
                       </td>
@@ -701,25 +623,45 @@ export default function InventoryPage() {
                       <td className={cx(td, "font-bold text-slate-900")}>{Math.min(...prices) === Math.max(...prices) ? rupee(prices[0]) : `${rupee(Math.min(...prices))} – ${rupee(Math.max(...prices))}`}</td>
                       <td className={td}>
                         <span className="flex flex-wrap items-center gap-1.5">
-                          {tracked.length > 0 && <b className="text-slate-900">{tracked.reduce((n, v) => n + v.stock!, 0)} in all</b>}
+                          {tracked.length > 0 ? (
+                            <>
+                              <b className="text-slate-900">{tracked.reduce((n, v) => n + v.stock!, 0)}</b>
+                              <span className="text-[11.5px] font-semibold text-slate-400">total</span>
+                            </>
+                          ) : (
+                            <span className="text-slate-400">∞ untracked</span>
+                          )}
                           {outCount > 0 && <Badge tone="red">{outCount} sold out</Badge>}
                           {lowCount > 0 && <Badge tone="amber">{lowCount} low</Badge>}
                         </span>
                       </td>
-                      <td className={td} />
+                      <td className={cx(td, "text-slate-600")}>
+                        {g.items.filter((v) => v.active).length} of {g.items.length} on menu
+                      </td>
                       <td className={cx(td, "text-right")}>
-                        <Btn size="sm" kind="plain" icon="edit" onClick={(e) => (e.stopPropagation(), openFamily(g.family))}>
-                          Edit variants
-                        </Btn>
+                        <span className="inline-flex gap-1">
+                          <Btn size="sm" kind="plain" icon="edit" onClick={(e) => (e.stopPropagation(), openFamily(g.family))}>
+                            Edit
+                          </Btn>
+                          {role === "admin" && (
+                            <Btn
+                              size="sm"
+                              kind="plain"
+                              className="text-red-600 hover:bg-red-50"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (await confirm({ title: `Delete ${g.family} and all ${g.items.length} variants?`, body: "They disappear from the menu and catalog, and their stock movement history is deleted too. Past orders and bills keep their copy of what was sold.", ok: "Delete all", danger: true }))
+                                  for (const v of g.items) await act("product.delete", { id: v.id });
+                              }}
+                              aria-label={`Delete ${g.family}`}
+                            >
+                              <Icon name="trash" size={14} />
+                            </Btn>
+                          )}
+                        </span>
                       </td>
                     </tr>
-                    {isOpen && (
-                      <tr className="border-b border-slate-100">
-                        <td colSpan={6} className="bg-white px-4 pb-4 pt-2">
-                          <div className="grid gap-3 lg:grid-cols-2">{g.items.map((v) => variantCard(v))}</div>
-                        </td>
-                      </tr>
-                    )}
+                    {isOpen && g.items.map((v) => row(v, true))}
                   </Fragment>
                 );
               })}
