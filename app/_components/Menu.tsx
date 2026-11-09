@@ -250,6 +250,7 @@ export default function Menu({ initial }: { initial: TabView }) {
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   const [sheet, setSheet] = useState<null | "cart" | "tab">(null);
+  const [pickFam, setPickFam] = useState<string | null>(null); // the product whose variants are open ("Tea")
   const [finish, setFinish] = useState(false);
   const [placed, setPlaced] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -635,20 +636,19 @@ export default function Menu({ initial }: { initial: TabView }) {
                         <h3>{g[0].family || g[0].name}</h3>
                         {g.some((v) => v.tags.includes("bestseller")) && <span className="tm-tag">★ Bestseller</span>}
                         {first.description && <p>{first.description}</p>}
-                        <ul className="tm-vars">
-                          {g.map((v) => (
-                            <li key={v.id} className={v.soldOut ? "is-out" : ""}>
-                              {v.image && <img className="tm-vars__img" src={sized(v.image, 120)} alt="" loading="lazy" decoding="async" />}
-                              <span className="tm-vars__name">
-                                {v.variant || "Regular"}
-                                {v.soldOut ? <em>Sold out</em> : v.left !== null ? <em>Only {v.left} left</em> : null}
-                              </span>
-                              <b className="tm-price">{rupee(v.price)}</b>
-                              {v.points > 0 && <span className="tm-pts" title="Loyalty points you earn">+{v.points} pts</span>}
-                              <span className="tm-item__act">{control(v)}</span>
-                            </li>
-                          ))}
-                        </ul>
+                        <div className="tm-item__foot">
+                          <b className="tm-price">
+                            {Math.min(...g.map((v) => v.price)) === Math.max(...g.map((v) => v.price)) ? rupee(g[0].price) : <><small className="tm-from">from</small> {rupee(Math.min(...g.map((v) => v.price)))}</>}
+                          </b>
+                          <span className="tm-left tm-left--soft">{g.length} options</span>
+                          {ordering && !allOut && (
+                            <span className="tm-item__act">
+                              <button type="button" className="tm-add" onClick={() => setPickFam(g[0].family)} aria-label={`Choose ${g[0].family}`}>
+                                {inCart ? `${g.reduce((n, v) => n + (cart[v.id] ?? 0), 0)} added` : "Choose"} <span aria-hidden="true">›</span>
+                              </button>
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </li>
                   );
@@ -704,6 +704,37 @@ export default function Menu({ initial }: { initial: TabView }) {
           <Arrow size={18} />
         </button>
       </div>
+
+      {/* ================= variants sheet: pick a kind of a product ("Tea") ================= */}
+      <Sheet open={pickFam !== null} onClose={() => setPickFam(null)} label={pickFam ?? "Options"}>
+        {pickFam !== null && (
+          <div className="tm-vsheet">
+            <h3 className="tm-vsheet__title">{pickFam}</h3>
+            <p className="tm-vsheet__sub">Pick what you would like</p>
+            <ul className="tm-vlist">
+              {view.menu
+                .filter((m) => m.family === pickFam)
+                .map((v) => (
+                  <li key={v.id} className={v.soldOut ? "is-out" : ""}>
+                    {v.image ? <img className="tm-vlist__img" src={sized(v.image, 140)} alt="" loading="lazy" decoding="async" /> : <span className="tm-vlist__img tm-vlist__ph">{(v.variant || v.name).slice(0, 1)}</span>}
+                    <span className="tm-vlist__name">
+                      <b>{v.variant || "Regular"}</b>
+                      <span>
+                        <b className="tm-price">{rupee(v.price)}</b>
+                        {v.points > 0 && <span className="tm-pts" title="Loyalty points you earn">+{v.points} pts</span>}
+                      </span>
+                      {v.soldOut ? <em>Sold out</em> : v.left !== null ? <em>Only {v.left} left</em> : null}
+                    </span>
+                    <span className="tm-item__act">{control(v)}</span>
+                  </li>
+                ))}
+            </ul>
+            <button type="button" className="tm-send" onClick={() => setPickFam(null)}>
+              Done
+            </button>
+          </div>
+        )}
+      </Sheet>
 
       {/* ================= cart sheet ================= */}
       <Sheet open={sheet === "cart"} onClose={closeSheet} label="Your order">
