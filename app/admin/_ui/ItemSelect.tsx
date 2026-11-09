@@ -2,15 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { rupee } from "@/lib/money";
+import { entries } from "@/lib/variants";
 import { Icon, Modal, SearchBox, cx, inputLineCls } from "./kit";
 
-export type PickItem = { id: string; name: string; category: string; price?: number };
+export type PickItem = { id: string; name: string; category: string; price?: number; family?: string; variant?: string };
 
 /** The menu-item chooser used wherever an item is picked from a dropdown: choose a category first (or search), then the
     item. Items are grouped by category, so a long menu is easy to scan. */
 export function ItemPickerModal({ products, value, onPick, onClose, title = "Pick an item", clear }: { products: PickItem[]; value?: string; onPick: (id: string) => void; onClose: () => void; title?: string; clear?: string }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("");
+  const [openFam, setOpenFam] = useState<string | null>(null);
   const cats = useMemo(() => {
     const m = new Map<string, number>();
     for (const p of products) m.set(p.category || "Other", (m.get(p.category || "Other") ?? 0) + 1);
@@ -26,7 +28,7 @@ export function ItemPickerModal({ products, value, onPick, onClose, title = "Pic
     }
     return [...by].sort((a, b) => a[0].localeCompare(b[0])).map(([c, list]) => [c, list.sort((a, b) => a.name.localeCompare(b.name))] as const);
   }, [products, q, cat]);
-  const total = groups.reduce((a, [, l]) => a + l.length, 0);
+  const total = groups.reduce((a, [, l]) => a + entries(l).length, 0);
 
   return (
     <Modal open onClose={onClose} title={title}>
@@ -51,15 +53,31 @@ export function ItemPickerModal({ products, value, onPick, onClose, title = "Pic
             groups.map(([c, list]) => (
               <div key={c}>
                 {!cat && <p className="sticky top-0 bg-slate-50 px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500">{c}</p>}
-                {list.map((p) => (
-                  <button key={p.id} type="button" onClick={() => onPick(p.id)} className={cx("flex w-full items-center justify-between gap-3 border-b border-slate-50 px-3.5 py-2.5 text-left text-[13.5px] hover:bg-slate-50", value === p.id && "bg-red-50")}>
-                    <span className="min-w-0 truncate font-semibold text-slate-900">{p.name}</span>
-                    <span className="flex shrink-0 items-center gap-2 text-slate-500">
-                      {p.price !== undefined && rupee(p.price)}
-                      {value === p.id && <Icon name="check" size={14} className="text-red-600" />}
-                    </span>
-                  </button>
-                ))}
+                {entries(list).map((e) => {
+                  const row = (p: PickItem, label: string, nested = false) => (
+                    <button key={p.id} type="button" onClick={() => onPick(p.id)} className={cx("flex w-full items-center justify-between gap-3 border-b border-slate-50 py-2.5 pr-3.5 text-left text-[13.5px] hover:bg-slate-50", nested ? "bg-slate-50/60 pl-9" : "pl-3.5", value === p.id && "bg-red-50")}>
+                      <span className="min-w-0 truncate font-semibold text-slate-900">{label}</span>
+                      <span className="flex shrink-0 items-center gap-2 text-slate-500">
+                        {p.price !== undefined && rupee(p.price)}
+                        {value === p.id && <Icon name="check" size={14} className="text-red-600" />}
+                      </span>
+                    </button>
+                  );
+                  if (e.family === null) return row(e.item, e.item.name);
+                  const shown = !!q.trim() || openFam === e.family || e.items.some((v) => v.id === value);
+                  return (
+                    <div key={`f:${e.family}`}>
+                      <button type="button" onClick={() => setOpenFam(openFam === e.family ? null : e.family)} aria-expanded={shown} className="flex w-full items-center justify-between gap-3 border-b border-slate-50 px-3.5 py-2.5 text-left text-[13.5px] hover:bg-slate-50">
+                        <span className="min-w-0 truncate font-semibold text-slate-900">{e.family}</span>
+                        <span className="flex shrink-0 items-center gap-2 text-[12px] text-slate-500">
+                          {e.items.length} kinds
+                          <Icon name="chevron" size={14} className={cx("text-slate-400 transition-transform", shown && "rotate-90")} />
+                        </span>
+                      </button>
+                      {shown && e.items.map((v) => row(v, v.variant || "Regular", true))}
+                    </div>
+                  );
+                })}
               </div>
             ))
           )}

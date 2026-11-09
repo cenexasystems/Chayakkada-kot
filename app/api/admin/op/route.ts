@@ -7,6 +7,7 @@ import { ApiError } from "@/lib/store";
    console actually surfaces (orders, bill.create, product.stock, tabs) is
    open to them; the admin-only pages are already blocked server-side. */
 const ADMIN_ONLY_OPS = new Set([
+  "product.group",
   "settings.update",
   "user.promote",
   "user.demote",

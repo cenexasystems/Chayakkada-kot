@@ -159,7 +159,7 @@ export default function StockMovementsPage() {
           </select>
           <ItemSelect
             className="!h-10 !w-[210px] max-w-full !rounded-full"
-            products={names.map((n) => ({ id: n.id, name: n.name, category: s.products.find((p) => p.id === n.id)?.category ?? "Removed items" }))}
+            products={names.map((n) => { const pr = s.products.find((p) => p.id === n.id); return { id: n.id, name: n.name, category: pr?.category ?? "Removed items", family: pr?.family, variant: pr?.variant }; })}
             value={pid === "all" ? "" : pid}
             onChange={(v) => filter(setPid)(v || "all")}
             none="All products"

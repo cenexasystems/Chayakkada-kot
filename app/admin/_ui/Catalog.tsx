@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { Product } from "@/lib/types";
 import { rupee } from "@/lib/money";
 import { pointsPerUnit } from "@/lib/loyalty/engine";
+import { entries } from "@/lib/variants";
 import { useAdmin } from "./Store";
 import { Btn, Icon, Modal, SearchBox, cx } from "./kit";
 
@@ -30,6 +31,7 @@ export default function Catalog({
   const [cat, setCat] = useState("All");
   const [cart, setCart] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
+  const [openFam, setOpenFam] = useState<string | null>(null);
 
   const close = () => {
     setQ("");
@@ -39,6 +41,8 @@ export default function Catalog({
 
   const cats = useMemo(() => ["All", ...Array.from(new Set(s.products.map((p) => p.category)))], [s.products]);
   const list = s.products.filter((p) => (cat === "All" || p.category === cat) && (!q || `${p.name} ${p.category}`.toLowerCase().includes(q.toLowerCase())) && (onPick || p.active));
+  // one card per product; a product with kinds ("Tea") is one card that opens to its variants
+  const cards = useMemo(() => entries(list), [list]);
   const count = Object.values(cart).reduce((a, b) => a + b, 0);
   const total = Object.entries(cart).reduce((a, [id, n]) => a + (s.products.find((p) => p.id === id)?.price ?? 0) * n, 0);
 
@@ -50,6 +54,49 @@ export default function Catalog({
       else delete next[p.id];
       return next;
     });
+
+  /** one sellable item (or one variant, whose label is just the kind: "Masala") */
+  const card = (p: Product, label?: string) => {
+    const out = p.stock !== null && p.stock <= 0;
+    const n = cart[p.id] ?? 0;
+    const pts = pointsPerUnit(p, s.loyaltyEarn);
+    return (
+      <div
+        className={cx(
+          "flex items-center gap-3 rounded-2xl border p-2.5 transition",
+          n ? "border-slate-400 bg-slate-50" : "border-slate-100 hover:border-slate-300",
+          out && onAdd && "opacity-50",
+        )}
+      >
+        {p.image ? <img src={thumb(p.image)} alt="" className="h-12 w-12 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-12 w-12 place-items-center rounded-xl bg-slate-100 font-bold text-slate-400">{(label ?? p.name)[0]}</span>}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13.5px] font-semibold text-slate-900">{label ?? p.name}</p>
+          <p className="text-[12px] text-slate-500">
+            <b className="text-slate-800">{rupee(p.price)}</b>{pts > 0 && <b className="ml-1.5 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700" title="Loyalty points a member earns">+{pts} pts</b>} · {p.stock === null ? "always available" : out ? <span className="text-red-600">sold out</span> : `${p.stock} in stock`}
+          </p>
+        </div>
+        {onPick ? (
+          <Btn size="sm" kind="soft" onClick={() => (onPick(p), close())}>
+            Use
+          </Btn>
+        ) : n ? (
+          <span className="flex items-center gap-1">
+            <button type="button" className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-700" onClick={() => bump(p, -1)} aria-label="Less">
+              <Icon name="minus" size={14} />
+            </button>
+            <b className="w-6 text-center text-[14px]">{n}</b>
+            <button type="button" className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-700" onClick={() => bump(p, 1)} aria-label="More" disabled={p.stock !== null && n >= p.stock}>
+              <Icon name="plus" size={14} />
+            </button>
+          </span>
+        ) : (
+          <Btn size="sm" kind="soft" disabled={out} onClick={() => bump(p, 1)} icon="plus">
+            Add
+          </Btn>
+        )}
+      </div>
+    );
+  };
 
   return (
     <Modal
@@ -94,45 +141,27 @@ export default function Catalog({
         ))}
       </div>
       <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-        {list.map((p) => {
-          const out = p.stock !== null && p.stock <= 0;
-          const n = cart[p.id] ?? 0;
-          const pts = pointsPerUnit(p, s.loyaltyEarn);
+        {cards.map((e) => {
+          if (e.family === null) return <li key={e.item.id}>{card(e.item)}</li>;
+          const shown = !!q || openFam === e.family;
+          const first = e.items.find((v) => v.image) ?? e.items[0];
+          const prices = e.items.map((v) => v.price);
+          const inCart = e.items.reduce((n, v) => n + (cart[v.id] ?? 0), 0);
           return (
-            <li key={p.id}>
-              <div
-                className={cx(
-                  "flex items-center gap-3 rounded-2xl border p-2.5 transition",
-                  n ? "border-slate-400 bg-slate-50" : "border-slate-100 hover:border-slate-300",
-                  out && onAdd && "opacity-50",
-                )}
-              >
-                {p.image ? <img src={thumb(p.image)} alt="" className="h-12 w-12 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-12 w-12 place-items-center rounded-xl bg-slate-100 font-bold text-slate-400">{p.name[0]}</span>}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13.5px] font-semibold text-slate-900">{p.name}</p>
-                  <p className="text-[12px] text-slate-500">
-                    <b className="text-slate-800">{rupee(p.price)}</b>{pts > 0 && <b className="ml-1.5 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700" title="Loyalty points a member earns">+{pts} pts</b>} · {p.stock === null ? "always available" : out ? <span className="text-red-600">sold out</span> : `${p.stock} in stock`}
-                  </p>
-                </div>
-                {onPick ? (
-                  <Btn size="sm" kind="soft" onClick={() => (onPick(p), close())}>
-                    Use
-                  </Btn>
-                ) : n ? (
-                  <span className="flex items-center gap-1">
-                    <button type="button" className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-700" onClick={() => bump(p, -1)} aria-label="Less">
-                      <Icon name="minus" size={14} />
-                    </button>
-                    <b className="w-6 text-center text-[14px]">{n}</b>
-                    <button type="button" className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white text-slate-700" onClick={() => bump(p, 1)} aria-label="More" disabled={p.stock !== null && n >= p.stock}>
-                      <Icon name="plus" size={14} />
-                    </button>
+            <li key={`f:${e.family}`} className="sm:col-span-2">
+              <div className={cx("rounded-2xl border transition", inCart ? "border-slate-400 bg-slate-50" : "border-slate-100")}>
+                <button type="button" onClick={() => setOpenFam(shown && !q ? null : e.family)} className="flex w-full items-center gap-3 p-2.5 text-left" aria-expanded={shown}>
+                  {first.image ? <img src={thumb(first.image)} alt="" className="h-12 w-12 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-12 w-12 place-items-center rounded-xl bg-slate-100 font-bold text-slate-400">{e.family[0]}</span>}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-semibold text-slate-900">{e.family}</span>
+                    <span className="text-[12px] text-slate-500">
+                      {e.items.length} kinds · {Math.min(...prices) === Math.max(...prices) ? rupee(prices[0]) : `${rupee(Math.min(...prices))} – ${rupee(Math.max(...prices))}`}
+                      {inCart > 0 && <b className="ml-1.5 text-slate-800">· {inCart} added</b>}
+                    </span>
                   </span>
-                ) : (
-                  <Btn size="sm" kind="soft" disabled={out} onClick={() => bump(p, 1)} icon="plus">
-                    Add
-                  </Btn>
-                )}
+                  <Icon name="chevron" size={15} className={cx("shrink-0 text-slate-400 transition-transform", shown && "rotate-90")} />
+                </button>
+                {shown && <ul className="grid gap-2 border-t border-slate-100 p-2.5 sm:grid-cols-2">{e.items.map((v) => <li key={v.id}>{card(v, v.variant || "Regular")}</li>)}</ul>}
               </div>
             </li>
           );

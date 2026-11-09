@@ -230,6 +230,7 @@ export default function InventoryPage() {
   const [renameOf, setRenameOf] = useState<string | null>(null);
   const [renaming, setRenaming] = useState("");
   const [openFam, setOpenFam] = useState<string[]>([]);
+  const [grp, setGrp] = useState<{ family: string; rows: { id: string; on: boolean; variant: string }[]; busy: boolean } | null>(null);
   const [move, setMove] = useState<{ p: Product; dir: "added" | "removed"; qty: string; note: string } | null>(null);
 
   /* categories in use, plus ones added from Manage categories that have no products yet */
@@ -239,6 +240,8 @@ export default function InventoryPage() {
   const out = s.products.filter((p) => p.stock !== null && p.stock <= 0);
   const value = s.products.reduce((a, p) => a + (p.stock && p.stock > 0 ? p.stock * p.price : 0), 0);
 
+  const familyNames = new Set(s.products.filter((p) => p.family).map((p) => p.family.toLowerCase()));
+  const keyOf = (p: Product) => (p.family ? `f:${p.family.toLowerCase()}` : familyNames.has(p.name.toLowerCase()) ? `f:${p.name.toLowerCase()}` : `p:${p.id}`);
   const filtered = s.products.filter((p) => {
     if (cat !== "All" && p.category !== cat) return false;
     if (q && !`${p.name} ${p.family} ${p.variant} ${p.category} ${p.description}`.toLowerCase().includes(q.toLowerCase())) return false;
@@ -252,7 +255,7 @@ export default function InventoryPage() {
   const list = [
     ...filtered
       .reduce((m, p) => {
-        const k = p.family ? `f:${p.family.toLowerCase()}` : `p:${p.id}`;
+        const k = keyOf(p);
         m.set(k, [...(m.get(k) ?? []), p]);
         return m;
       }, new Map<string, Product[]>())
@@ -262,10 +265,15 @@ export default function InventoryPage() {
   const groups = (() => {
     const m = new Map<string, Product[]>();
     for (const p of list) {
-      const k = p.family ? `f:${p.family.toLowerCase()}` : `p:${p.id}`;
+      const k = keyOf(p);
       m.set(k, [...(m.get(k) ?? []), p]);
     }
-    return [...m.entries()].map(([key, items]) => ({ key, family: items[0].family, items }));
+    // the plain product (no variant name) leads its group
+    return [...m.entries()].map(([key, items]) => {
+      const sorted = [...items].sort((a, b) => Number(!!a.variant) - Number(!!b.variant));
+      const fam = key.startsWith("f:") ? sorted.find((x) => x.family)?.family ?? sorted[0].name : "";
+      return { key, family: fam, items: sorted };
+    });
   })();
 
   const row = (p: Product, nested: boolean) => (
@@ -304,8 +312,8 @@ export default function InventoryPage() {
                         Stock in/out
                       </Btn>
                     )}
-                    <Btn size="sm" kind="plain" icon="plus" onClick={() => addVariant(p)} title={`Add another variant of ${p.variant ? p.family : p.name}`}>
-                      Variant
+                    <Btn size="sm" kind="plain" icon="plus" onClick={() => startGroup(p)} title={`Turn ${p.name} (and similar products) into variants`}>
+                      Variants
                     </Btn>
                     <Btn size="sm" kind="plain" icon="edit" onClick={() => open(p)}>
                       Edit
@@ -331,6 +339,7 @@ export default function InventoryPage() {
 
   /** one variant, in full: everything it has of its own */
   const variantCard = (v: Product) => {
+    const stray = !v.variant; // a plain "Tea" left beside Tea (Masala)… — it is no longer sold on its own
     const pts = pointsPerUnit({ id: v.id, category: v.category, price: v.price, loyaltyPoints: v.loyaltyPoints }, s.loyaltyEarn);
     const soldOut = v.stock !== null && v.stock <= 0;
     const lowNow = v.stock !== null && v.stock > 0 && v.stock <= v.lowAt;
@@ -338,10 +347,10 @@ export default function InventoryPage() {
     return (
       <div key={v.id} className={cx("rounded-2xl border border-slate-200 bg-white p-4", !v.active && "opacity-70")}>
         <div className="flex gap-3">
-          {v.image ? <img src={thumb(v.image)} alt="" className="h-16 w-16 shrink-0 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-slate-100 text-lg font-bold text-slate-400">{v.variant[0]}</span>}
+          {v.image ? <img src={thumb(v.image)} alt="" className="h-16 w-16 shrink-0 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-slate-100 text-lg font-bold text-slate-400">{(v.variant || v.name)[0]}</span>}
           <div className="min-w-0 flex-1">
             <p className="flex flex-wrap items-center gap-2 text-[15px] font-bold text-slate-900">
-              {v.variant}
+              {v.variant || "Standard"}
               {soldOut ? <Badge tone="red">Sold out</Badge> : lowNow ? <Badge tone="amber">Low</Badge> : null}
               {v.tags.map((tg) => (
                 <Badge key={tg} tone={tg === "bestseller" ? "amber" : "violet"}>
@@ -353,6 +362,11 @@ export default function InventoryPage() {
           </div>
           <Switch on={v.active} onChange={() => act("product.toggle", { id: v.id })} label={`${v.name} on the menu`} />
         </div>
+        {stray && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold text-amber-800">
+            This plain “{v.name}” is not sold any more — billing and the menu show only the variants. Edit it to give it a variant name (it becomes “{v.name} (…)”), or delete it.
+          </p>
+        )}
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
           <div>
             <dt className={lab}>Price</dt>
@@ -426,6 +440,36 @@ export default function InventoryPage() {
           }
         : { ...EMPTY, category: cat !== "All" ? cat : cats[0] ?? "" },
     );
+
+  /** Pick the products that are really kinds of one product ("Tea", "Jaggery Tea"…) and turn them into its variants. */
+  const startGroup = (p: Product) => {
+    const family = p.name;
+    const word = family.toLowerCase();
+    const shaped = (x: Product) => x.name.toLowerCase().startsWith(`${word} (`) && x.name.endsWith(")"); // already written "Tea (Masala)"
+    const anyShaped = s.products.some((x) => !x.variant && shaped(x));
+    const rows = s.products
+      .filter((x) => !x.variant)
+      .map((x) => {
+        const mine = x.id === p.id;
+        const rest = shaped(x) ? x.name.slice(word.length + 2, -1).trim() : x.name.split(/\s+/).filter((w) => w.toLowerCase() !== word).join(" ").trim();
+        // "Tea" itself becomes the "Regular" kind — unless kinds like "Tea (Masala)" already exist, then it is the one to leave out
+        const on = mine ? !anyShaped : shaped(x) || (x.name.toLowerCase().includes(word) && x.category === p.category && !anyShaped);
+        return { id: x.id, mine, on, variant: mine || !rest ? "Regular" : rest };
+      })
+      .sort((a, b) => Number(b.mine) - Number(a.mine) || Number(b.on) - Number(a.on));
+    setGrp({ family, rows: rows.map(({ id, on, variant }) => ({ id, on, variant })), busy: false });
+  };
+  const saveGroup = async () => {
+    if (!grp) return;
+    const picked = grp.rows.filter((r) => r.on);
+    setGrp({ ...grp, busy: true });
+    const r = await act("product.group", { family: grp.family.trim(), items: picked.map((x) => ({ id: x.id, variant: x.variant.trim() })) });
+    if (r.ok) {
+      toast({ kind: "ok", title: `${grp.family.trim()} now has ${picked.length} variant${picked.length === 1 ? "" : "s"}` });
+      setOpenFam((o) => [...o, `f:${grp.family.trim().toLowerCase()}`]);
+      setGrp(null);
+    } else setGrp({ ...grp, busy: false });
+  };
 
   /** A new variant of the same product: same name, category, picture and description; price, stock, alert and points are its own. */
   const addVariant = (p: Product) =>
@@ -643,7 +687,7 @@ export default function InventoryPage() {
                           {first.image ? <img src={thumb(first.image)} alt="" className="h-11 w-11 rounded-xl object-cover" loading="lazy" /> : <span className="grid h-11 w-11 place-items-center rounded-xl bg-slate-100 font-bold text-slate-400">{g.family[0]}</span>}
                           <div className="min-w-0">
                             <p className="font-bold text-slate-900">{g.family}</p>
-                            <p className="mt-0.5 text-[11.5px] text-slate-500">{g.items.length} variant{g.items.length === 1 ? "" : "s"}: {g.items.map((v) => v.variant).join(", ")}</p>
+                            <p className="mt-0.5 text-[11.5px] text-slate-500">{g.items.length} variant{g.items.length === 1 ? "" : "s"}: {g.items.map((v) => v.variant || "Standard").join(", ")}</p>
                           </div>
                         </div>
                       </td>
@@ -957,6 +1001,56 @@ export default function InventoryPage() {
                   );
                 })}
               </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+      <Modal
+        open={!!grp}
+        onClose={() => setGrp(null)}
+        title="Make variants of one product"
+        wide
+        footer={
+          <>
+            <Btn onClick={() => setGrp(null)}>Cancel</Btn>
+            <Btn kind="red" disabled={!grp || grp.busy || !grp.family.trim() || !grp.rows.some((r) => r.on) || grp.rows.some((r) => r.on && !r.variant.trim())} onClick={saveGroup}>
+              Make variants
+            </Btn>
+          </>
+        }
+      >
+        {grp && (
+          <div className="space-y-4">
+            <Field label="Product name (shared)" hint="They all show under this name, e.g. Tea → Tea (Regular), Tea (Jaggery).">
+              <input className={inputCls} value={grp.family} maxLength={60} onChange={(e) => setGrp({ ...grp, family: e.target.value })} />
+            </Field>
+            <div>
+              <p className="mb-1.5 text-[12.5px] font-semibold text-slate-700">Which products are its variants?</p>
+              <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-100">
+                {grp.rows.map((r) => {
+                  const x = s.products.find((pp) => pp.id === r.id);
+                  if (!x) return null;
+                  return (
+                    <li key={r.id} className="flex flex-wrap items-center gap-3 bg-white px-3 py-2.5">
+                      <input type="checkbox" className="h-4 w-4" checked={r.on} onChange={(e) => setGrp({ ...grp, rows: grp.rows.map((z) => (z.id === r.id ? { ...z, on: e.target.checked } : z)) })} aria-label={`Include ${x.name}`} />
+                      <span className="min-w-0 flex-1">
+                        <b className="block truncate text-[13.5px] text-slate-900">{x.name}</b>
+                        <span className="text-[11.5px] text-slate-500">{x.category} · {rupee(x.price)}</span>
+                      </span>
+                      <input
+                        className={cx(inputCls, "!h-9 !w-40")}
+                        disabled={!r.on}
+                        value={r.variant}
+                        maxLength={40}
+                        placeholder="Variant name"
+                        onChange={(e) => setGrp({ ...grp, rows: grp.rows.map((z) => (z.id === r.id ? { ...z, variant: e.target.value } : z)) })}
+                        aria-label={`Variant name for ${x.name}`}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="mt-2 text-[12px] text-slate-500">Each keeps its own price, stock, alert, loyalty points and picture. Only the name changes — old bills keep the name they were made with. A product you leave unticked stays as it is; if it is just a duplicate of the plain name, delete it afterwards.</p>
             </div>
           </div>
         )}

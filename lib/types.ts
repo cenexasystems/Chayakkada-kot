@@ -197,6 +197,7 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   "product.delete": "Deleted a product",
   "product.stock": "Changed a product's stock",
   "product.toggle": "Switched a product on/off the menu",
+  "product.group": "Made products into variants of one product",
   "category.rename": "Renamed a category",
   "category.add": "Added a category",
   "category.delete": "Removed a category",
@@ -567,7 +568,7 @@ export type TabView = {
   } | null;
 };
 
-export type MenuItem = Pick<Product, "id" | "name" | "category" | "price" | "description" | "image" | "tags"> & {
+export type MenuItem = Pick<Product, "id" | "name" | "family" | "variant" | "category" | "price" | "description" | "image" | "tags"> & {
   soldOut: boolean;
   left: number | null;
   /** loyalty points one of this item earns (0 = none) */

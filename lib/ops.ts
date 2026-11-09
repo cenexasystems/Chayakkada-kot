@@ -7,6 +7,7 @@ import { db, type Db, type Tx } from "./db";
 import { batches, bills, coupons, expenseCategories, expenses, ingredientMoves, ingredients, meta, orders, products, recipes, sessions, settings, staffUsers, stockMovements, supplierInvoices, suppliers, approvalRequests, activityLog, loyaltyCustomers, loyaltyRewards, loyaltyCampaigns, loyaltyVouchers, giftOffers, productCategories } from "./db/schema";
 import * as L from "./loyalty/server";
 import { pointsPerUnit } from "./loyalty/engine";
+import { shadowIds } from "./variants";
 import type { LoyaltyConfig } from "./loyalty/config";
 import { INGREDIENT_UNITS, UPI_CHANNELS, type AdminState, type Coupon, type UpiChannel, Bill, Ingredient, IngredientLedger, IngredientMove, IngredientMoveType, IngredientUnit, StockLedger, MenuItem, Order, OrderItem, OrderStatus, PayMethod, Product, PublicUser, Recipe, RecipeItem, Session, StaffUser, StockMoveType, TabClose, TabView, ShopDetails } from "./types";
 
@@ -78,12 +79,15 @@ const logoLink = (src: string) => (src.startsWith("data:") ? `/shop-logo?v=${src
 export function menuOf(all: Product[], cfg: { enabled: boolean; earn: LoyaltyConfig["earn"] }): MenuItem[] {
   const order: string[] = [];
   for (const p of all) if (!order.includes(p.category)) order.push(p.category);
+  const shadow = shadowIds(all); // a leftover plain "Tea" beside Tea (Masala)… is not sold on its own
   return all
-    .filter((p) => p.active)
+    .filter((p) => p.active && !shadow.has(p.id))
     .sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category) || a.createdAt - b.createdAt)
     .map((p) => ({
       id: p.id,
       name: p.name,
+      family: p.family,
+      variant: p.variant,
       category: p.category,
       price: p.price,
       description: p.description,
@@ -1375,6 +1379,28 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         if (n) throw new ApiError(`${name} still has ${n} product${n === 1 ? "" : "s"} — move or delete them first.`);
         await tx.delete(productCategories).where(eq(productCategories.name, name));
         return null;
+      }
+      case "product.group": {
+        /* Several existing products become the variants of one: "Tea", "Jaggery Tea", "Brown Sugar Tea" → Tea (Regular),
+           Tea (Jaggery), Tea (Brown Sugar). Each keeps its own price, stock, points and picture; only the name changes
+           (past bills and logs keep the name they were made with). */
+        const family = str(a.family, 60);
+        const rows = (Array.isArray(a.items) ? (a.items as { id?: unknown; variant?: unknown }[]) : []).map((r) => ({ id: str(r.id, 40), variant: str(r.variant, 40) }));
+        if (!family) throw new ApiError("Give the product a name.");
+        if (rows.length < 1 || rows.some((r) => !r.id || !r.variant)) throw new ApiError("Give every variant a name.");
+        const names = rows.map((r) => r.variant.toLowerCase());
+        if (new Set(names).size !== names.length) throw new ApiError("Two variants have the same name.");
+        const all = await tx.select().from(products);
+        const ids = new Set(rows.map((r) => r.id));
+        for (const r of rows) {
+          const full = `${family} (${r.variant})`;
+          const clash = all.find((p) => p.name.toLowerCase() === full.toLowerCase() && !ids.has(p.id));
+          if (clash) throw new ApiError(`"${clash.name}" already exists.`);
+          const p = all.find((x) => x.id === r.id);
+          if (!p) throw new ApiError("Product not found.", 404);
+          await tx.update(products).set({ family, variant: r.variant, name: full, updatedAt: now }).where(eq(products.id, r.id));
+        }
+        return { family, count: rows.length };
       }
       case "product.toggle": {
         const p = await must(tx.select().from(products).where(eq(products.id, id)), "Product");

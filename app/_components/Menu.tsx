@@ -4,6 +4,7 @@ import { subscribeChanges } from "@/lib/realtime";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { MenuItem, OrderStatus, TabClose, TabView } from "@/lib/types";
 import { rupee } from "@/lib/money";
+import { entries } from "@/lib/variants";
 import { Arrow, Cherry } from "./bits";
 import { UpiPay } from "./UpiPay";
 
@@ -382,6 +383,9 @@ export default function Menu({ initial }: { initial: TabView }) {
   const total = lines.reduce((s, l) => s + (l.item ? l.item.price * l.qty : 0), 0);
   const unavailable = lines.filter((l) => !l.item || l.item.soldOut || (l.item.left !== null && l.qty > l.item.left));
 
+  /** the variants of one product sit together: [[Tea (Regular), Tea (Masala)], [Brownie]] */
+  const groupMenu = (items: MenuItem[]) => entries(items).map((e) => (e.family === null ? [e.item] : e.items));
+
   const needle = q.trim().toLowerCase();
   const cats = useMemo(() => {
     const out: { name: string; items: MenuItem[] }[] = [];
@@ -395,6 +399,19 @@ export default function Menu({ initial }: { initial: TabView }) {
   }, [view.menu, needle]);
 
   const maxFor = (m: MenuItem) => Math.min(30, m.left ?? 30);
+
+  /** The add / stepper control of one menu item (or of one variant). */
+  const control = (m: MenuItem) => {
+    const qty = cart[m.id] ?? 0;
+    if (!ordering || m.soldOut) return null;
+    return qty ? (
+      <Stepper qty={qty} max={maxFor(m)} name={m.name} onChange={(n) => setQty(m.id, n)} />
+    ) : (
+      <button type="button" className="tm-add" onClick={(e) => add(m, e)} aria-label={`Add ${m.name}`}>
+        Add <span aria-hidden="true">+</span>
+      </button>
+    );
+  };
 
   /* ---------- scroll-spy for the category rail ---------- */
   useEffect(() => {
@@ -602,7 +619,40 @@ export default function Menu({ initial }: { initial: TabView }) {
               <h2 id={`cat-${ci}`}>{c.name}</h2>
             </header>
             <ul>
-              {c.items.map((m, i) => {
+              {groupMenu(c.items).map((g, i) => {
+                if (g.length > 1 || g[0].variant) {
+                  // one product with kinds — "Tea": the name once, then each kind with its own price, points and stock
+                  const first = g.find((v) => v.image) ?? g[0];
+                  const allOut = g.every((v) => v.soldOut);
+                  const inCart = g.some((v) => cart[v.id]);
+                  return (
+                    <li key={g[0].family || g[0].id} className={`tm-item ${allOut ? "is-out" : ""} ${inCart ? "is-in" : ""}`} style={{ "--i": Math.min(i, 8) } as CSSVars}>
+                      <div className="tm-item__img">
+                        {first.image ? <img src={sized(first.image, 280)} alt="" loading={ci < 1 ? "eager" : "lazy"} decoding="async" /> : <span className="tm-item__ph">{(g[0].family || g[0].name).slice(0, 1)}</span>}
+                        {allOut && <span className="tm-item__out">Sold out</span>}
+                      </div>
+                      <div className="tm-item__body">
+                        <h3>{g[0].family || g[0].name}</h3>
+                        {g.some((v) => v.tags.includes("bestseller")) && <span className="tm-tag">★ Bestseller</span>}
+                        {first.description && <p>{first.description}</p>}
+                        <ul className="tm-vars">
+                          {g.map((v) => (
+                            <li key={v.id} className={v.soldOut ? "is-out" : ""}>
+                              <span className="tm-vars__name">
+                                {v.variant || "Regular"}
+                                {v.soldOut ? <em>Sold out</em> : v.left !== null ? <em>Only {v.left} left</em> : null}
+                              </span>
+                              <b className="tm-price">{rupee(v.price)}</b>
+                              {v.points > 0 && <span className="tm-pts" title="Loyalty points you earn">+{v.points} pts</span>}
+                              <span className="tm-item__act">{control(v)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </li>
+                  );
+                }
+                const m = g[0];
                 const qty = cart[m.id] ?? 0;
                 return (
                   <li key={m.id} className={`tm-item ${m.soldOut ? "is-out" : ""} ${qty ? "is-in" : ""}`} style={{ "--i": Math.min(i, 8) } as CSSVars}>
@@ -621,17 +671,7 @@ export default function Menu({ initial }: { initial: TabView }) {
                         <b className="tm-price">{rupee(m.price)}</b>
                         {m.points > 0 && <span className="tm-pts" title="Loyalty points you earn">+{m.points} pts</span>}
                         {m.left !== null && !m.soldOut && <span className="tm-left">Only {m.left} left</span>}
-                        {ordering && (
-                          <span className="tm-item__act">
-                            {m.soldOut ? null : qty ? (
-                              <Stepper qty={qty} max={maxFor(m)} name={m.name} onChange={(n) => setQty(m.id, n)} />
-                            ) : (
-                              <button type="button" className="tm-add" onClick={(e) => add(m, e)} aria-label={`Add ${m.name}`}>
-                                Add <span aria-hidden="true">+</span>
-                              </button>
-                            )}
-                          </span>
-                        )}
+                        {ordering && <span className="tm-item__act">{control(m)}</span>}
                       </div>
                     </div>
                   </li>
