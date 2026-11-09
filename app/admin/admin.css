@@ -333,8 +333,16 @@ html:has(.adm) {
   .adm-app {
     display: none !important;
   }
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
   .adm-print {
     display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0;
     color: #000;
   }
 }
@@ -388,8 +396,12 @@ html:has(.adm) {
 }
 
 /* 80mm thermal receipt */
+/* The receipt fills whatever width the paper (page) has and keeps an even gap on both sides, so it sits in the
+   middle of the roll instead of being pushed to one side. */
 .rcpt {
-  width: 72mm;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 4mm;
   margin: 0 auto;
   font: 500 10pt/1.35 ui-monospace, "Cascadia Mono", Consolas, monospace;
   color: #000;
@@ -418,6 +430,7 @@ html:has(.adm) {
 }
 
 .rcpt--2 {
+  padding: 0 5mm;
   font-size: 8pt;
 }
 .rcpt--2 h1 {
@@ -430,6 +443,9 @@ html:has(.adm) {
 /* A3 / A4 / A5 invoice — the same layout as the invoice page, sized in em so paper size only changes font-size.
    All text is dark so it prints clearly. */
 .inv {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 auto;
   font: 500 11pt/1.45 var(--body), "Segoe UI", Arial, sans-serif;
   color: #000;
 }

@@ -64,6 +64,10 @@ export const products = pgTable("products", {
   lowAt: integer("low_at").notNull().default(4),
   /** loyalty points one unit earns; null = use the shop-wide earn rule. Set by the admin. */
   loyaltyPoints: integer("loyalty_points"),
+  /** Variants: "Tea" with "Regular" and "Masala" is two products sharing a family. Each is a full product of its own
+      (price, stock, alert, points, picture); `name` is the full "Tea (Masala)" so every bill and log shows it. */
+  family: text("family").notNull().default(""),
+  variant: text("variant").notNull().default(""),
   description: text("description").notNull().default(""),
   image: text("image").notNull().default(""),
   eggless: boolean("eggless").notNull().default(false),

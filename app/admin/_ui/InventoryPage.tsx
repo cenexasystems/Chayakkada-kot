@@ -19,7 +19,10 @@ const fileToDataUrl = (f: File) =>
 
 type Form = {
   id?: string;
+  /** the product's name; for a variant it is the shared name ("Tea") and `variant` says which one */
   name: string;
+  /** "Regular", "Masala"… blank = an ordinary product */
+  variant: string;
   category: string;
   price: string;
   track: boolean;
@@ -33,7 +36,7 @@ type Form = {
   active: boolean;
 };
 
-const EMPTY: Form = { name: "", category: "", price: "", track: true, stock: "10", lowAt: "4", loyaltyPoints: "", description: "", image: "", tags: [], active: true };
+const EMPTY: Form = { name: "", variant: "", category: "", price: "", track: true, stock: "10", lowAt: "4", loyaltyPoints: "", description: "", image: "", tags: [], active: true };
 const TAGS = [
   ["bestseller", "★ Bestseller"],
   ["new", "New"],
@@ -235,15 +238,25 @@ export default function InventoryPage() {
   const out = s.products.filter((p) => p.stock !== null && p.stock <= 0);
   const value = s.products.reduce((a, p) => a + (p.stock && p.stock > 0 ? p.stock * p.price : 0), 0);
 
-  const list = s.products.filter((p) => {
+  const filtered = s.products.filter((p) => {
     if (cat !== "All" && p.category !== cat) return false;
-    if (q && !`${p.name} ${p.category} ${p.description}`.toLowerCase().includes(q.toLowerCase())) return false;
+    if (q && !`${p.name} ${p.family} ${p.variant} ${p.category} ${p.description}`.toLowerCase().includes(q.toLowerCase())) return false;
     if (filter === "menu") return p.active;
     if (filter === "hidden") return !p.active;
     if (filter === "low") return p.stock !== null && p.stock > 0 && p.stock <= p.lowAt;
     if (filter === "out") return p.stock !== null && p.stock <= 0;
     return true;
   });
+  // the variants of one product sit together, in the place the first of them would be
+  const list = [
+    ...filtered
+      .reduce((m, p) => {
+        const k = p.family ? `f:${p.family.toLowerCase()}` : `p:${p.id}`;
+        m.set(k, [...(m.get(k) ?? []), p]);
+        return m;
+      }, new Map<string, Product[]>())
+      .values(),
+  ].flat();
 
   const open = (p?: Product) => {
     setCatEdit(null);
@@ -254,7 +267,8 @@ export default function InventoryPage() {
       p
         ? {
             id: p.id,
-            name: p.name,
+            name: p.variant ? p.family : p.name,
+            variant: p.variant,
             category: p.category,
             price: String(p.price),
             track: p.stock !== null,
@@ -268,6 +282,10 @@ export default function InventoryPage() {
           }
         : { ...EMPTY, category: cat !== "All" ? cat : cats[0] ?? "" },
     );
+
+  /** A new variant of the same product: same name, category, picture and description; price, stock, alert and points are its own. */
+  const addVariant = (p: Product) =>
+    setForm({ ...EMPTY, name: p.variant ? p.family : p.name, category: p.category, description: p.description, image: p.image, tags: p.tags, track: p.stock !== null, lowAt: String(p.lowAt) });
 
   const applyCat = () => {
     if (!catEdit || !form) return;
@@ -472,6 +490,7 @@ export default function InventoryPage() {
                       <div className="min-w-0">
                         <p className="flex items-center gap-2 font-semibold text-slate-900">
                           {p.name}
+                          {p.variant && <Badge tone="violet">Variant</Badge>}
                         </p>
                         <p className="mt-0.5 flex flex-wrap gap-1">
                           {p.tags.map((t) => (
@@ -499,6 +518,9 @@ export default function InventoryPage() {
                           Stock in/out
                         </Btn>
                       )}
+                      <Btn size="sm" kind="plain" icon="plus" onClick={() => addVariant(p)} title={`Add another variant of ${p.variant ? p.family : p.name}`}>
+                        Variant
+                      </Btn>
                       <Btn size="sm" kind="plain" icon="edit" onClick={() => open(p)}>
                         Edit
                       </Btn>
@@ -704,8 +726,15 @@ export default function InventoryPage() {
         {form && (
           <div className="grid gap-5 md:grid-cols-[1fr_220px]">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Name *" className="sm:col-span-2">
-                <input className={inputCls} value={form.name} maxLength={80} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Crispy Veg Burger" />
+              <Field label={form.variant.trim() ? "Product name * (shared by all its variants)" : "Name *"} className="sm:col-span-2">
+                <input className={inputCls} value={form.name} maxLength={60} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Crispy Veg Burger" />
+              </Field>
+              <Field
+                label="Variant (optional)"
+                className="sm:col-span-2"
+                hint={form.variant.trim() && form.name.trim() ? `It will appear as “${form.name.trim()} (${form.variant.trim()})” everywhere — menu, bills, stock history. It gets its own price, stock, alert and points below.` : "For one product sold in kinds — Tea: Regular, Masala · Coffee: Small, Large. Leave blank for an ordinary product."}
+              >
+                <input className={inputCls} value={form.variant} maxLength={40} onChange={(e) => setForm({ ...form, variant: e.target.value })} placeholder="Masala" />
               </Field>
               <Field label="Category *">
                 <select className={inputCls} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>

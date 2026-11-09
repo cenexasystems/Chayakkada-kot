@@ -12,6 +12,10 @@ export type Product = {
   lowAt: number;
   /** loyalty points one unit earns; null = the shop-wide earn rule. Only the admin sets it. */
   loyaltyPoints: number | null;
+  /** the shared name of a product's variants ("Tea"); empty for an ordinary product */
+  family: string;
+  /** which variant this one is ("Masala"); `name` already reads "Tea (Masala)" */
+  variant: string;
   description: string;
   image: string;
   eggless: boolean;

@@ -71,6 +71,8 @@ export function seedData(): { products: Product[]; coupons: Coupon[]; shopName: 
     stock,
     lowAt: 4,
     loyaltyPoints: null,
+    family: "",
+    variant: "",
     description,
     image: U(img),
     eggless,

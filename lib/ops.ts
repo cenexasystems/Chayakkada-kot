@@ -624,15 +624,21 @@ const restock = (tx: Tx, items: OrderItem[], m: Move) => moveStock(tx, tally(ite
 
 async function saveProduct(tx: Tx, a: Args, role = "admin") {
   const now = Date.now();
-  const name = str(a.name, 80);
+  // A variant ("Masala" of "Tea") is a product of its own; its name is always the full "Tea (Masala)" so bills,
+  // stock movements and loyalty records say which one was sold.
+  const variant = str(a.variant, 40);
+  const family = variant ? str(a.family, 60) || str(a.name, 60) : "";
+  const name = variant ? `${family} (${variant})` : str(a.name, 80);
   const category = str(a.category, 40) || "Uncategorised";
   const price = round2(num(a.price));
   const stockRaw = optNum(a.stock);
-  if (!name) throw new ApiError("Give the product a name.");
+  if (!name || (variant && !family)) throw new ApiError("Give the product a name.");
   if (!(price >= 0)) throw new ApiError("Enter a valid price.");
   if (stockRaw !== null && !(stockRaw >= 0)) throw new ApiError("Stock can't be negative.");
   const fields = {
     name,
+    family,
+    variant,
     category,
     price,
     stock: stockRaw === null ? null : Math.floor(stockRaw),

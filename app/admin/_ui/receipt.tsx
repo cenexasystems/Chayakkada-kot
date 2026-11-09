@@ -281,7 +281,7 @@ function Sheet({ b, shop, logo, details, size }: { b: Bill; shop: string; logo?:
 
 function Thermal({ b, shop, logo, lines, roll }: { b: Bill; shop: string; logo?: string; lines: string[]; roll: 2 | 3 }) {
   return (
-    <div className={`rcpt rcpt--${roll}`} style={{ width: `${ROLL_MM[roll][1]}mm` }}>
+    <div className={`rcpt rcpt--${roll}`}>
       {!logo || logo === "/logo.png" ? (
         <>
           {/* the 8:2 + CHAYAKKADA logo, in pure black and white so a thermal printer prints it sharply */}
