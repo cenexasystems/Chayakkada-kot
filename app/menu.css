@@ -1869,3 +1869,10 @@
 .tm-vars .tm-price {
   font-size: 15px;
 }
+.tm-vars__img {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+}

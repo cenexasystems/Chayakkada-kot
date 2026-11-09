@@ -638,6 +638,7 @@ export default function Menu({ initial }: { initial: TabView }) {
                         <ul className="tm-vars">
                           {g.map((v) => (
                             <li key={v.id} className={v.soldOut ? "is-out" : ""}>
+                              {v.image && <img className="tm-vars__img" src={sized(v.image, 120)} alt="" loading="lazy" decoding="async" />}
                               <span className="tm-vars__name">
                                 {v.variant || "Regular"}
                                 {v.soldOut ? <em>Sold out</em> : v.left !== null ? <em>Only {v.left} left</em> : null}

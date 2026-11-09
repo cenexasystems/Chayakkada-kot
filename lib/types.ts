@@ -197,7 +197,7 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   "product.delete": "Deleted a product",
   "product.stock": "Changed a product's stock",
   "product.toggle": "Switched a product on/off the menu",
-  "product.group": "Made products into variants of one product",
+  "product.family.save": "Saved a product with its variants",
   "category.rename": "Renamed a category",
   "category.add": "Added a category",
   "category.delete": "Removed a category",

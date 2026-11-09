@@ -19,10 +19,13 @@ const fileToDataUrl = (f: File) =>
 
 type Form = {
   id?: string;
-  /** the product's name; for a variant it is the shared name ("Tea") and `variant` says which one */
+  /** the product's name; for a product with variants it is the shared name ("Popcorn") */
   name: string;
-  /** "Regular", "Masala"… blank = an ordinary product */
-  variant: string;
+  /** the product comes in kinds (Small, Regular, Large) — each with its own price, stock, alert, points and picture */
+  hasVar: boolean;
+  /** when editing a product that already has variants: the name it had */
+  fam: string;
+  vrows: VRow[];
   category: string;
   price: string;
   track: boolean;
@@ -36,7 +39,10 @@ type Form = {
   active: boolean;
 };
 
-const EMPTY: Form = { name: "", variant: "", category: "", price: "", track: true, stock: "10", lowAt: "4", loyaltyPoints: "", description: "", image: "", tags: [], active: true };
+/** One kind of a product. `id` is set for a kind that already exists. */
+type VRow = { id?: string; name: string; price: string; track: boolean; stock: string; lowAt: string; points: string; image: string; active: boolean };
+const NEW_ROW: VRow = { name: "", price: "", track: true, stock: "10", lowAt: "4", points: "", image: "", active: true };
+const EMPTY: Form = { name: "", hasVar: false, fam: "", vrows: [], category: "", price: "", track: true, stock: "10", lowAt: "4", loyaltyPoints: "", description: "", image: "", tags: [], active: true };
 const TAGS = [
   ["bestseller", "★ Bestseller"],
   ["new", "New"],
@@ -230,7 +236,6 @@ export default function InventoryPage() {
   const [renameOf, setRenameOf] = useState<string | null>(null);
   const [renaming, setRenaming] = useState("");
   const [openFam, setOpenFam] = useState<string[]>([]);
-  const [grp, setGrp] = useState<{ family: string; rows: { id: string; on: boolean; variant: string }[]; busy: boolean } | null>(null);
   const [move, setMove] = useState<{ p: Product; dir: "added" | "removed"; qty: string; note: string } | null>(null);
 
   /* categories in use, plus ones added from Manage categories that have no products yet */
@@ -312,9 +317,6 @@ export default function InventoryPage() {
                         Stock in/out
                       </Btn>
                     )}
-                    <Btn size="sm" kind="plain" icon="plus" onClick={() => startGroup(p)} title={`Turn ${p.name} (and similar products) into variants`}>
-                      Variants
-                    </Btn>
                     <Btn size="sm" kind="plain" icon="edit" onClick={() => open(p)}>
                       Edit
                     </Btn>
@@ -418,15 +420,33 @@ export default function InventoryPage() {
 
   const open = (p?: Product) => {
     setCatEdit(null);
-    openForm(p);
+    if (p?.family) openFamily(p.family);
+    else openForm(p);
   };
+  const rowOf = (v: Product): VRow => ({ id: v.id, name: v.variant, price: String(v.price), track: v.stock !== null, stock: v.stock === null ? "10" : String(v.stock), lowAt: String(v.lowAt), points: v.loyaltyPoints === null ? "" : String(v.loyaltyPoints), image: v.image, active: v.active });
+  /** Edit a product that comes in kinds: all of them in one form. */
+  const openFamily = (family: string) => {
+    const kids = s.products.filter((p) => p.family.toLowerCase() === family.toLowerCase());
+    if (!kids.length) return;
+    const first = kids[0];
+    setCatEdit(null);
+    setForm({ ...EMPTY, name: family, hasVar: true, fam: family, vrows: kids.map(rowOf), category: first.category, description: first.description, tags: first.tags });
+  };
+  /** Switch the form to "comes in kinds": what was typed so far becomes the first kind. */
+  const turnOnVariants = (f: Form): Form => ({
+    ...f,
+    hasVar: true,
+    vrows: [{ id: f.id, name: f.id ? "Regular" : "", price: f.price, track: f.track, stock: f.stock, lowAt: f.lowAt, points: f.loyaltyPoints, image: f.image, active: f.active }, { ...NEW_ROW }],
+  });
   const openForm = (p?: Product) =>
     setForm(
       p
         ? {
             id: p.id,
-            name: p.variant ? p.family : p.name,
-            variant: p.variant,
+            name: p.name,
+            hasVar: false,
+            fam: "",
+            vrows: [],
             category: p.category,
             price: String(p.price),
             track: p.stock !== null,
@@ -440,40 +460,6 @@ export default function InventoryPage() {
           }
         : { ...EMPTY, category: cat !== "All" ? cat : cats[0] ?? "" },
     );
-
-  /** Pick the products that are really kinds of one product ("Tea", "Jaggery Tea"…) and turn them into its variants. */
-  const startGroup = (p: Product) => {
-    const family = p.name;
-    const word = family.toLowerCase();
-    const shaped = (x: Product) => x.name.toLowerCase().startsWith(`${word} (`) && x.name.endsWith(")"); // already written "Tea (Masala)"
-    const anyShaped = s.products.some((x) => !x.variant && shaped(x));
-    const rows = s.products
-      .filter((x) => !x.variant)
-      .map((x) => {
-        const mine = x.id === p.id;
-        const rest = shaped(x) ? x.name.slice(word.length + 2, -1).trim() : x.name.split(/\s+/).filter((w) => w.toLowerCase() !== word).join(" ").trim();
-        // "Tea" itself becomes the "Regular" kind — unless kinds like "Tea (Masala)" already exist, then it is the one to leave out
-        const on = mine ? !anyShaped : shaped(x) || (x.name.toLowerCase().includes(word) && x.category === p.category && !anyShaped);
-        return { id: x.id, mine, on, variant: mine || !rest ? "Regular" : rest };
-      })
-      .sort((a, b) => Number(b.mine) - Number(a.mine) || Number(b.on) - Number(a.on));
-    setGrp({ family, rows: rows.map(({ id, on, variant }) => ({ id, on, variant })), busy: false });
-  };
-  const saveGroup = async () => {
-    if (!grp) return;
-    const picked = grp.rows.filter((r) => r.on);
-    setGrp({ ...grp, busy: true });
-    const r = await act("product.group", { family: grp.family.trim(), items: picked.map((x) => ({ id: x.id, variant: x.variant.trim() })) });
-    if (r.ok) {
-      toast({ kind: "ok", title: `${grp.family.trim()} now has ${picked.length} variant${picked.length === 1 ? "" : "s"}` });
-      setOpenFam((o) => [...o, `f:${grp.family.trim().toLowerCase()}`]);
-      setGrp(null);
-    } else setGrp({ ...grp, busy: false });
-  };
-
-  /** A new variant of the same product: same name, category, picture and description; price, stock, alert and points are its own. */
-  const addVariant = (p: Product) =>
-    setForm({ ...EMPTY, name: p.variant ? p.family : p.name, category: p.category, description: p.description, image: p.image, tags: p.tags, track: p.stock !== null, lowAt: String(p.lowAt) });
 
   const applyCat = () => {
     if (!catEdit || !form) return;
@@ -554,6 +540,26 @@ export default function InventoryPage() {
 
   const save = async () => {
     if (!form) return;
+    if (form.hasVar) {
+      const gone = s.products.filter((p) => form.fam && p.family.toLowerCase() === form.fam.toLowerCase() && !form.vrows.some((r) => r.id === p.id));
+      if (gone.length && !(await confirm({ title: `Delete ${gone.map((g) => g.variant).join(", ")}?`, body: "You removed these variants. They are deleted, and their stock history goes with them. Past bills keep their copy of what was sold.", ok: "Delete and save", danger: true }))) return;
+      setBusy(true);
+      const rv = await act<Product[]>("product.family.save", {
+        family: form.name,
+        oldFamily: form.fam,
+        category: form.category,
+        description: form.description,
+        tags: form.tags,
+        variants: form.vrows.map((r) => ({ id: r.id, name: r.name, price: r.price, stock: r.track ? r.stock : null, lowAt: r.lowAt, image: r.image, active: r.active, loyaltyPoints: r.points })),
+      });
+      setBusy(false);
+      if (rv.ok) {
+        if (!rv.pending) toast({ kind: "ok", title: `${form.name.trim()} saved with ${form.vrows.length} variant${form.vrows.length === 1 ? "" : "s"}` });
+        setOpenFam((o) => [...o, `f:${form.name.trim().toLowerCase()}`]);
+        setForm(null);
+      }
+      return;
+    }
     setBusy(true);
     const r = await act<Product>("product.save", { ...form, stock: form.track ? form.stock : null });
     setBusy(false);
@@ -702,8 +708,8 @@ export default function InventoryPage() {
                       </td>
                       <td className={td} />
                       <td className={cx(td, "text-right")}>
-                        <Btn size="sm" kind="plain" icon="plus" onClick={(e) => (e.stopPropagation(), addVariant(first))}>
-                          Add variant
+                        <Btn size="sm" kind="plain" icon="edit" onClick={(e) => (e.stopPropagation(), openFamily(g.family))}>
+                          Edit variants
                         </Btn>
                       </td>
                     </tr>
@@ -892,7 +898,7 @@ export default function InventoryPage() {
         footer={
           <>
             <Btn onClick={() => setForm(null)}>Cancel</Btn>
-            <Btn kind="red" disabled={busy || !form?.name.trim() || form?.price === ""} onClick={save}>
+            <Btn kind="red" disabled={busy || !form?.name.trim() || (form?.hasVar ? !form.vrows.length || form.vrows.some((r) => !r.name.trim() || r.price === "") : form?.price === "")} onClick={save}>
               {form?.id ? "Save product" : "Add product"}
             </Btn>
           </>
@@ -901,16 +907,18 @@ export default function InventoryPage() {
         {form && (
           <div className="grid gap-5 md:grid-cols-[1fr_220px]">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={form.variant.trim() ? "Product name * (shared by all its variants)" : "Name *"} className="sm:col-span-2">
-                <input className={inputCls} value={form.name} maxLength={60} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Crispy Veg Burger" />
+              <Field label="Name *" className="sm:col-span-2">
+                <input className={inputCls} value={form.name} maxLength={60} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={form.hasVar ? "Popcorn" : "Crispy Veg Burger"} />
               </Field>
-              <Field
-                label="Variant (optional)"
-                className="sm:col-span-2"
-                hint={form.variant.trim() && form.name.trim() ? `It will appear as “${form.name.trim()} (${form.variant.trim()})” everywhere — menu, bills, stock history. It gets its own price, stock, alert and points below.` : "For one product sold in kinds — Tea: Regular, Masala · Coffee: Small, Large. Leave blank for an ordinary product."}
-              >
-                <input className={inputCls} value={form.variant} maxLength={40} onChange={(e) => setForm({ ...form, variant: e.target.value })} placeholder="Masala" />
-              </Field>
+              <div className="rounded-2xl border border-slate-100 p-4 sm:col-span-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span>
+                    <b className="block text-[13px] text-slate-800">This product has variants</b>
+                    <span className="text-[12px] text-slate-500">Like Popcorn in Small, Regular and Large — each with its own picture, price, stock, alert and loyalty points.</span>
+                  </span>
+                  <Switch on={form.hasVar} onChange={(v) => !form.fam && setForm(v ? turnOnVariants(form) : { ...form, hasVar: false, vrows: [] })} label="This product has variants" />
+                </div>
+              </div>
               <Field label="Category *">
                 <select className={inputCls} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
                   {!form.category && <option value="">Select category…</option>}
@@ -938,6 +946,8 @@ export default function InventoryPage() {
                   </div>
                 )}
               </Field>
+              {!form.hasVar && (
+                <>
               <Field label="Price (₹) *">
                 <input className={inputCls} type="number" min={0} step="0.5" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="140" />
               </Field>
@@ -971,14 +981,82 @@ export default function InventoryPage() {
               ) : (
                 <p className="rounded-xl bg-slate-50 px-4 py-2.5 text-[12.5px] text-slate-500 sm:col-span-2">Loyalty points for this item are set by the admin.</p>
               )}
+                </>
+              )}
               <Field label="Description" className="sm:col-span-2">
                 <textarea className={cx(inputCls, "h-20 resize-none py-3")} maxLength={240} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="One line that makes it irresistible." />
               </Field>
-              <Field label="Image" className="sm:col-span-2" hint="Upload one photo (JPEG, PNG, WebP or GIF, up to 4 MB) or paste a link.">
-                <ImageField value={form.image} onChange={(v) => setForm({ ...form, image: v })} />
-              </Field>
+              {!form.hasVar && (
+                <Field label="Image" className="sm:col-span-2" hint="Upload one photo (JPEG, PNG, WebP or GIF, up to 4 MB) or paste a link.">
+                  <ImageField value={form.image} onChange={(v) => setForm({ ...form, image: v })} />
+                </Field>
+              )}
+              {form.hasVar && (
+                <div className="space-y-3 sm:col-span-2">
+                  <p className="text-[12.5px] font-semibold text-slate-700">Variants — e.g. Small, Regular, Large</p>
+                  {form.vrows.map((r, k) => {
+                    const upd = (patch: Partial<VRow>) => setForm({ ...form, vrows: form.vrows.map((z, n) => (n === k ? { ...z, ...patch } : z)) });
+                    const auto = pointsPerUnit({ id: r.id ?? "", category: form.category, price: Number(r.price) || 0, loyaltyPoints: null }, s.loyaltyEarn);
+                    return (
+                      <div key={r.id ?? `n${k}`} className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="flex items-start gap-3">
+                          <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2">
+                            <Field label="Variant name *">
+                              <input className={inputCls} value={r.name} maxLength={40} placeholder={["Small", "Regular", "Large"][k] ?? "Name"} onChange={(e) => upd({ name: e.target.value })} />
+                            </Field>
+                            <Field label="Price (₹) *">
+                              <input className={inputCls} type="number" min={0} step="0.5" value={r.price} onChange={(e) => upd({ price: e.target.value })} />
+                            </Field>
+                            <div className="rounded-xl border border-slate-100 p-3 sm:col-span-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <b className="text-[12.5px] text-slate-800">Track stock</b>
+                                <Switch on={r.track} onChange={(v) => upd({ track: v })} label={`Track stock for ${r.name || "this variant"}`} />
+                              </div>
+                              {r.track && (
+                                <div className="mt-3 grid grid-cols-2 gap-3">
+                                  <Field label="In stock now">
+                                    <input className={inputCls} type="number" min={0} value={r.stock} onChange={(e) => upd({ stock: e.target.value })} />
+                                  </Field>
+                                  <Field label="Low-stock alert at">
+                                    <input className={inputCls} type="number" min={0} value={r.lowAt} onChange={(e) => upd({ lowAt: e.target.value })} />
+                                  </Field>
+                                </div>
+                              )}
+                            </div>
+                            {role === "admin" ? (
+                              <Field label="Loyalty points" hint={`Blank = automatic${r.price ? ` (${auto} pts)` : ""}`}>
+                                <input className={inputCls} type="number" min={0} step={1} inputMode="numeric" placeholder={r.price ? `Automatic (${auto})` : "Automatic"} value={r.points} onChange={(e) => upd({ points: e.target.value })} />
+                              </Field>
+                            ) : (
+                              <p className="self-end rounded-xl bg-slate-50 px-3 py-2.5 text-[12px] text-slate-500">Loyalty points are set by the admin.</p>
+                            )}
+                            <label className="flex cursor-pointer items-center justify-between gap-3 self-end rounded-xl border border-slate-100 px-3 py-2.5 text-[13px] font-semibold text-slate-700">
+                              Show on menu
+                              <Switch on={r.active} onChange={(v) => upd({ active: v })} label={`Show ${r.name || "this variant"} on the menu`} />
+                            </label>
+                            <Field label="Image" className="sm:col-span-2">
+                              <ImageField value={r.image} onChange={(v) => upd({ image: v })} />
+                            </Field>
+                          </div>
+                          <div className="flex w-24 shrink-0 flex-col items-center gap-2">
+                            <div className="aspect-square w-full overflow-hidden rounded-xl bg-slate-100">{r.image ? <img src={r.image} alt="" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center text-[11px] text-slate-400">No image</span>}</div>
+                            <Btn size="sm" kind="plain" className="text-red-600 hover:bg-red-50" disabled={form.vrows.length <= 1} onClick={() => setForm({ ...form, vrows: form.vrows.filter((_, n) => n !== k) })} aria-label={`Remove ${r.name || "variant"}`}>
+                              <Icon name="trash" size={14} /> Remove
+                            </Btn>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <Btn icon="plus" onClick={() => setForm({ ...form, vrows: [...form.vrows, { ...NEW_ROW }] })}>
+                    Add another variant
+                  </Btn>
+                </div>
+              )}
             </div>
             <div className="space-y-4">
+              {!form.hasVar && (
+                <>
               <div className="aspect-square overflow-hidden rounded-2xl bg-slate-100">
                 {form.image ? <img src={form.image} alt="" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center text-[12px] text-slate-400">No image</span>}
               </div>
@@ -986,6 +1064,8 @@ export default function InventoryPage() {
                 Show on menu
                 <Switch on={form.active} onChange={(v) => setForm({ ...form, active: v })} label="Show on menu" />
               </label>
+                </>
+              )}
               <div className="flex flex-wrap gap-2">
                 {TAGS.map(([t, label]) => {
                   const on = form.tags.includes(t);
@@ -1001,56 +1081,6 @@ export default function InventoryPage() {
                   );
                 })}
               </div>
-            </div>
-          </div>
-        )}
-      </Modal>
-      <Modal
-        open={!!grp}
-        onClose={() => setGrp(null)}
-        title="Make variants of one product"
-        wide
-        footer={
-          <>
-            <Btn onClick={() => setGrp(null)}>Cancel</Btn>
-            <Btn kind="red" disabled={!grp || grp.busy || !grp.family.trim() || !grp.rows.some((r) => r.on) || grp.rows.some((r) => r.on && !r.variant.trim())} onClick={saveGroup}>
-              Make variants
-            </Btn>
-          </>
-        }
-      >
-        {grp && (
-          <div className="space-y-4">
-            <Field label="Product name (shared)" hint="They all show under this name, e.g. Tea → Tea (Regular), Tea (Jaggery).">
-              <input className={inputCls} value={grp.family} maxLength={60} onChange={(e) => setGrp({ ...grp, family: e.target.value })} />
-            </Field>
-            <div>
-              <p className="mb-1.5 text-[12.5px] font-semibold text-slate-700">Which products are its variants?</p>
-              <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-100">
-                {grp.rows.map((r) => {
-                  const x = s.products.find((pp) => pp.id === r.id);
-                  if (!x) return null;
-                  return (
-                    <li key={r.id} className="flex flex-wrap items-center gap-3 bg-white px-3 py-2.5">
-                      <input type="checkbox" className="h-4 w-4" checked={r.on} onChange={(e) => setGrp({ ...grp, rows: grp.rows.map((z) => (z.id === r.id ? { ...z, on: e.target.checked } : z)) })} aria-label={`Include ${x.name}`} />
-                      <span className="min-w-0 flex-1">
-                        <b className="block truncate text-[13.5px] text-slate-900">{x.name}</b>
-                        <span className="text-[11.5px] text-slate-500">{x.category} · {rupee(x.price)}</span>
-                      </span>
-                      <input
-                        className={cx(inputCls, "!h-9 !w-40")}
-                        disabled={!r.on}
-                        value={r.variant}
-                        maxLength={40}
-                        placeholder="Variant name"
-                        onChange={(e) => setGrp({ ...grp, rows: grp.rows.map((z) => (z.id === r.id ? { ...z, variant: e.target.value } : z)) })}
-                        aria-label={`Variant name for ${x.name}`}
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-              <p className="mt-2 text-[12px] text-slate-500">Each keeps its own price, stock, alert, loyalty points and picture. Only the name changes — old bills keep the name they were made with. A product you leave unticked stays as it is; if it is just a duplicate of the plain name, delete it afterwards.</p>
             </div>
           </div>
         )}

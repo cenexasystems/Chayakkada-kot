@@ -744,6 +744,34 @@ function ProductsTab({ bills, q, setQ }: { bills: Bill[]; q: string; setQ: (v: s
     ...s.products.filter((p) => !stats.some((x) => x.productId === p.id)).map((p) => ({ key: p.id, productId: p.id, name: p.name, qty: 0, revenue: 0 })),
   ];
   const needle = q.trim().toLowerCase();
+  // a product with variants (Popcorn: Small, Medium, Large) shows its total once, with each variant's own numbers under it
+  type Row = (typeof rows)[number];
+  const famOf = (r: Row) => (r.productId ? s.products.find((x) => x.id === r.productId)?.family ?? "" : "");
+  const view: { head?: { family: string; qty: number; revenue: number; n: number }; r?: Row; nested?: boolean }[] = [];
+  {
+    const seen = new Map<string, Row[]>();
+    const order: (string | Row)[] = [];
+    for (const r of rows.filter((x) => !needle || x.name.toLowerCase().includes(needle))) {
+      const f = famOf(r);
+      if (!f) order.push(r);
+      else {
+        const k = f.toLowerCase();
+        if (!seen.has(k)) {
+          seen.set(k, []);
+          order.push(k);
+        }
+        seen.get(k)!.push(r);
+      }
+    }
+    for (const o of order) {
+      if (typeof o !== "string") view.push({ r: o });
+      else {
+        const kids = seen.get(o)!;
+        view.push({ head: { family: famOf(kids[0]), qty: kids.reduce((a, x) => a + x.qty, 0), revenue: kids.reduce((a, x) => a + x.revenue, 0), n: kids.length } });
+        for (const k of kids) view.push({ r: k, nested: true });
+      }
+    }
+  }
   const low = s.products.filter((p) => p.stock !== null && p.stock <= p.lowAt);
   const byQty = [...stats].sort((a, b) => b.qty - a.qty);
   return (
@@ -769,15 +797,36 @@ function ProductsTab({ bills, q, setQ }: { bills: Bill[]; q: string; setQ: (v: s
               </tr>
             </thead>
             <tbody>
-              {rows
-                .filter((r) => !needle || r.name.toLowerCase().includes(needle))
-                .map((r, i) => {
+              {(() => {
+                let n = 0;
+                return view.map((e) => {
+                  if (e.head) {
+                    const h = e.head;
+                    n++;
+                    return (
+                      <tr key={`f:${h.family}`} className="border-b border-slate-100 bg-slate-50">
+                        <td className={cx(td, "text-slate-400")}>{n}</td>
+                        <td className={cx(td, "font-bold text-slate-900")}>
+                          {h.family} <span className="ml-1 text-[11.5px] font-medium text-slate-500">{h.n} variant{h.n === 1 ? "" : "s"}</span>
+                        </td>
+                        <td className={cx(td, "text-slate-500")}>{s.products.find((x) => x.family === h.family)?.category ?? ""}</td>
+                        <td className={cx(td, "text-right font-bold")}>{h.qty}</td>
+                        <td className={cx(td, "text-right font-bold text-slate-900")}>{rupee(h.revenue)}</td>
+                        <td className={td}>
+                          <span className="text-[11px] text-slate-500">{Math.round((h.revenue / total) * 100)}% of sales</span>
+                        </td>
+                        <td className={td} />
+                      </tr>
+                    );
+                  }
+                  const r = e.r!;
+                  if (!e.nested) n++;
                   const p = r.productId ? s.products.find((x) => x.id === r.productId) : null;
                   return (
                     <tr key={r.key} className="border-b border-slate-100 last:border-0">
-                      <td className={cx(td, "text-slate-400")}>{i + 1}</td>
-                      <td className={cx(td, "font-semibold text-slate-900")}>{r.name}</td>
-                      <td className={cx(td, "text-slate-500")}>{p?.category ?? "Custom item"}</td>
+                      <td className={cx(td, "text-slate-400")}>{e.nested ? "" : n}</td>
+                      <td className={cx(td, "font-semibold text-slate-900", e.nested && "pl-10")}>{e.nested && p?.variant ? <span className="border-l-2 border-violet-200 pl-3">{p.variant}</span> : r.name}</td>
+                      <td className={cx(td, "text-slate-500")}>{e.nested ? "" : p?.category ?? "Custom item"}</td>
                       <td className={cx(td, "text-right font-semibold")}>{r.qty}</td>
                       <td className={cx(td, "text-right font-bold text-slate-900")}>{rupee(r.revenue)}</td>
                       <td className={td}>
@@ -799,7 +848,8 @@ function ProductsTab({ bills, q, setQ }: { bills: Bill[]; q: string; setQ: (v: s
                       </td>
                     </tr>
                   );
-                })}
+                });
+              })()}
             </tbody>
           </table>
         </div>

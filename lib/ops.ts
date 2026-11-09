@@ -626,6 +626,51 @@ const tally = (items: OrderItem[], sign: 1 | -1, into = new Map<string, number>(
 
 const restock = (tx: Tx, items: OrderItem[], m: Move) => moveStock(tx, tally(items, 1), m);
 
+/** Deletes a product (or one of a product's variants) and everything that pointed at it.
+    The stock history goes with it, so the Stock movement log doesn't keep lines for something that no longer exists.
+    Past orders and bills keep their own copy of what was sold (they are money records), and the Activity log still
+    shows that it was deleted. A free-item reward for it is switched off, waiting free-item vouchers for it are
+    cancelled, and campaigns stop targeting it. */
+async function removeProduct(tx: Tx, p: Product) {
+  await tx.delete(stockMovements).where(eq(stockMovements.productId, p.id));
+  await tx.update(loyaltyRewards).set({ productId: null, active: false }).where(eq(loyaltyRewards.productId, p.id));
+  await tx.update(loyaltyVouchers).set({ status: "cancelled", note: "The product was deleted" }).where(and(eq(loyaltyVouchers.productId, p.id), eq(loyaltyVouchers.status, "issued")));
+  await tx.update(loyaltyCampaigns).set({ productIds: sql`${loyaltyCampaigns.productIds} - ${p.id}::text` }).where(sql`${loyaltyCampaigns.productIds} ? ${p.id}`);
+  await tx.delete(products).where(eq(products.id, p.id));
+}
+
+/** A product that comes in kinds — Popcorn: Small, Regular, Large. Each kind is a product of its own underneath (its own
+    price, stock, alert, loyalty points, picture), named "Popcorn (Large)" so every bill and log says which was sold. This
+    saves the whole set at once: kinds with an id are updated, kinds without one are created, and kinds left out are deleted. */
+async function saveFamily(tx: Tx, a: Args, role: string) {
+  const family = str(a.family, 60);
+  const oldFamily = str(a.oldFamily, 60);
+  const category = str(a.category, 40) || "Uncategorised";
+  const rows = Array.isArray(a.variants) ? (a.variants as Args[]) : [];
+  if (!family) throw new ApiError("Give the product a name.");
+  if (!rows.length) throw new ApiError("Add at least one variant.");
+  const names = rows.map((r) => str(r.name, 40).toLowerCase());
+  if (names.some((n) => !n)) throw new ApiError("Give every variant a name.");
+  if (new Set(names).size !== names.length) throw new ApiError("Two variants have the same name.");
+  const all = await tx.select().from(products);
+  const mine = oldFamily ? all.filter((p) => p.family.toLowerCase() === oldFamily.toLowerCase()) : [];
+  const keep = new Set(rows.map((r) => str(r.id, 40)).filter(Boolean));
+  const out: Product[] = [];
+  // kinds taken out of the form are deleted first, so their names are free to be reused
+  for (const p of mine) if (!keep.has(p.id)) await removeProduct(tx, p);
+  for (const r of rows) {
+    const rid = str(r.id, 40);
+    out.push(
+      await saveProduct(
+        tx,
+        { id: rid, family, name: family, variant: str(r.name, 40), category, description: a.description, tags: a.tags, active: r.active !== false, price: r.price, stock: r.stock, lowAt: r.lowAt, image: r.image, loyaltyPoints: r.loyaltyPoints },
+        role,
+      ),
+    );
+  }
+  return out;
+}
+
 async function saveProduct(tx: Tx, a: Args, role = "admin") {
   const now = Date.now();
   // A variant ("Masala" of "Tea") is a product of its own; its name is always the full "Tea (Masala)" so bills,
@@ -1313,16 +1358,7 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         return saveProduct(tx, a, role);
       case "product.delete": {
         const p = await must(tx.select().from(products).where(eq(products.id, id)), "Product");
-        /* The product's stock history goes with it, so the Stock movement log doesn't keep lines for something
-           that no longer exists. Past orders and bills keep their own copy of what was sold (they are money
-           records), and the Activity log still shows that the product was deleted. */
-        await tx.delete(stockMovements).where(eq(stockMovements.productId, p.id));
-        // nothing is left pointing at the deleted product: a free-item reward for it is switched off, waiting
-        // free-item vouchers for it are cancelled, and campaigns stop targeting it
-        await tx.update(loyaltyRewards).set({ productId: null, active: false }).where(eq(loyaltyRewards.productId, p.id));
-        await tx.update(loyaltyVouchers).set({ status: "cancelled", note: "The product was deleted" }).where(and(eq(loyaltyVouchers.productId, p.id), eq(loyaltyVouchers.status, "issued")));
-        await tx.update(loyaltyCampaigns).set({ productIds: sql`${loyaltyCampaigns.productIds} - ${p.id}::text` }).where(sql`${loyaltyCampaigns.productIds} ? ${p.id}`);
-        await tx.delete(products).where(eq(products.id, p.id));
+        await removeProduct(tx, p);
         return null;
       }
       case "product.stock": {
@@ -1380,28 +1416,8 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
         await tx.delete(productCategories).where(eq(productCategories.name, name));
         return null;
       }
-      case "product.group": {
-        /* Several existing products become the variants of one: "Tea", "Jaggery Tea", "Brown Sugar Tea" → Tea (Regular),
-           Tea (Jaggery), Tea (Brown Sugar). Each keeps its own price, stock, points and picture; only the name changes
-           (past bills and logs keep the name they were made with). */
-        const family = str(a.family, 60);
-        const rows = (Array.isArray(a.items) ? (a.items as { id?: unknown; variant?: unknown }[]) : []).map((r) => ({ id: str(r.id, 40), variant: str(r.variant, 40) }));
-        if (!family) throw new ApiError("Give the product a name.");
-        if (rows.length < 1 || rows.some((r) => !r.id || !r.variant)) throw new ApiError("Give every variant a name.");
-        const names = rows.map((r) => r.variant.toLowerCase());
-        if (new Set(names).size !== names.length) throw new ApiError("Two variants have the same name.");
-        const all = await tx.select().from(products);
-        const ids = new Set(rows.map((r) => r.id));
-        for (const r of rows) {
-          const full = `${family} (${r.variant})`;
-          const clash = all.find((p) => p.name.toLowerCase() === full.toLowerCase() && !ids.has(p.id));
-          if (clash) throw new ApiError(`"${clash.name}" already exists.`);
-          const p = all.find((x) => x.id === r.id);
-          if (!p) throw new ApiError("Product not found.", 404);
-          await tx.update(products).set({ family, variant: r.variant, name: full, updatedAt: now }).where(eq(products.id, r.id));
-        }
-        return { family, count: rows.length };
-      }
+      case "product.family.save":
+        return saveFamily(tx, a, role);
       case "product.toggle": {
         const p = await must(tx.select().from(products).where(eq(products.id, id)), "Product");
         const [u] = await tx.update(products).set({ active: !p.active, updatedAt: now }).where(eq(products.id, p.id)).returning();
