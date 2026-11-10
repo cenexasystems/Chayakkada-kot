@@ -41,12 +41,15 @@ export function useUpiQr(upi: { id: string; name: string; minutes: number; phone
   const query = `pa=${enc(upi.id)}&pn=${enc(upi.name)}&am=${amount.toFixed(2)}&cu=INR&tn=${enc(`${shop} ${ref}`.slice(0, 40))}`;
   const link = ready ? `upi://pay?${query}` : "";
   /* the same payment, opened straight in one app (the payee is the shop's saved UPI ID) */
+  /* These open with only the payee filled in. GPay/PhonePe refuse a link with a pre-filled amount to a personal UPI
+     ID ("exceeded the bank limit… retry with a smaller amount", even for ₹31), so the customer types the amount. */
+  const payee = `pa=${enc(upi.id)}&pn=${enc(upi.name)}&cu=INR`;
   const apps = ready
     ? [
-        { name: "Google Pay", href: `tez://upi/pay?${query}` },
-        { name: "PhonePe", href: `phonepe://pay?${query}` },
-        { name: "Paytm", href: `paytmmp://pay?${query}` },
-        { name: "Any UPI app", href: link },
+        { name: "Google Pay", href: `tez://upi/pay?${payee}` },
+        { name: "PhonePe", href: `phonepe://pay?${payee}` },
+        { name: "Paytm", href: `paytmmp://pay?${payee}` },
+        { name: "Any UPI app", href: `upi://pay?${payee}` },
       ]
     : [];
   return { link, ref, left, ready, apps };
