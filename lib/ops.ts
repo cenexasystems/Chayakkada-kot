@@ -300,8 +300,8 @@ export function applyCoupon(raw: unknown, couponRaw: unknown) {
 
 /** What the public payment page needs: who is being paid, and how. */
 export async function payPageInfo() {
-  const r = await first(db.select({ n: settings.shopName, logo: settings.logoUrl, id: settings.upiId, pn: settings.upiName, ph: settings.upiPhone, m: settings.upiQrMinutes, url: settings.publicUrl }).from(settings).where(eq(settings.id, 1)));
-  return { shopName: r?.n ?? "Cafe", logoUrl: logoLink(r?.logo ?? ""), upi: r?.id ? { id: r.id, name: r.pn || (r.n ?? "Cafe"), minutes: r.m ?? 5, phone: r.ph ?? "" } : null, publicUrl: (r?.url ?? "").replace(/\/+$/, "") };
+  const r = await first(db.select({ n: settings.shopName, logo: settings.logoUrl, id: settings.upiId, pn: settings.upiName, ph: settings.upiPhone, m: settings.upiQrMinutes, url: settings.publicUrl, q: settings.payShowQr, c: settings.payShowCopy, pp: settings.payShowPhone, ap: settings.payShowApps }).from(settings).where(eq(settings.id, 1)));
+  return { shopName: r?.n ?? "Cafe", logoUrl: logoLink(r?.logo ?? ""), upi: r?.id ? { id: r.id, name: r.pn || (r.n ?? "Cafe"), minutes: r.m ?? 5, phone: r.ph ?? "" } : null, publicUrl: (r?.url ?? "").replace(/\/+$/, ""), show: { qr: r?.q ?? true, copy: r?.c ?? true, phone: r?.pp ?? true, apps: r?.ap ?? true } };
 }
 
 /** What a guest owes on their open tab right now: their orders, less the coupon they applied. */
@@ -401,6 +401,10 @@ export async function adminState(): Promise<AdminState> {
       upiName: st[0]?.upiName ?? "",
       upiPhone: st[0]?.upiPhone ?? "",
       upiQrMinutes: st[0]?.upiQrMinutes ?? 5,
+      payShowQr: st[0]?.payShowQr ?? true,
+      payShowCopy: st[0]?.payShowCopy ?? true,
+      payShowPhone: st[0]?.payShowPhone ?? true,
+      payShowApps: st[0]?.payShowApps ?? true,
     },
     products: prods.map((p) => ({ ...p, image: imgLink(p.id, p.updatedAt, p.image) })),
     sessions: sess,
@@ -1223,6 +1227,7 @@ export async function runOp(tx: Tx, op: string, a: Args, role: string): Promise<
           patch.upiPhone = v;
         }
         if (a.upiQrMinutes !== undefined) patch.upiQrMinutes = int(a.upiQrMinutes, 1, 30, 5);
+        for (const k of ["payShowQr", "payShowCopy", "payShowPhone", "payShowApps"] as const) if (a[k] !== undefined) patch[k] = a[k] === true;
         if (a.ownerName !== undefined) patch.ownerName = str(a.ownerName, 80);
         if (a.location !== undefined) patch.location = str(a.location, 120);
         for (const k of ["address", "address2"] as const) {

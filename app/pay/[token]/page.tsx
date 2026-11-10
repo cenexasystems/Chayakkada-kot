@@ -21,5 +21,5 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
       </div>
     );
   }
-  return <PayClient amount={r.link.a} name={r.link.n} shop={info.shopName} logoUrl={info.logoUrl} upi={info.upi} />;
+  return <PayClient amount={r.link.a} name={r.link.n} shop={info.shopName} logoUrl={info.logoUrl} upi={info.upi} show={info.show} />;
 }

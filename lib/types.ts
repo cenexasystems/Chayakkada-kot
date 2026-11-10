@@ -521,7 +521,7 @@ export type DB = {
 
 /** What the admin panel receives (no secrets). */
 export type AdminState = Omit<DB, "settings" | "users"> & {
-  settings: ShopDetails & { shopName: string; publicUrl: string; walkInsOnly: boolean; kotEnabled: boolean; orderingEnabled: boolean; upiId: string; upiName: string; upiPhone: string; upiQrMinutes: number };
+  settings: ShopDetails & { shopName: string; publicUrl: string; walkInsOnly: boolean; kotEnabled: boolean; orderingEnabled: boolean; upiId: string; upiName: string; upiPhone: string; upiQrMinutes: number; payShowQr: boolean; payShowCopy: boolean; payShowPhone: boolean; payShowApps: boolean };
   users: PublicUser[];
   /** how loyalty points are earned, so each item can show what it earns */
   loyaltyEarn: Pick<LoyaltyConfig, "enabled" | "earn" | "display">;

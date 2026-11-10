@@ -71,6 +71,7 @@ function Settings({ onClose }: { onClose: () => void }) {
     shopName: d.shopName, ownerName: d.ownerName, location: d.location, address: d.address, address2: "",
     whatsapp1: d.whatsapp1, whatsapp2: "", customerCare: d.customerCare, email: d.email, mapsUrl: d.mapsUrl, logoUrl: d.logoUrl,
     upiId: d.upiId, upiName: d.upiName, upiPhone: d.upiPhone, upiQrMinutes: String(d.upiQrMinutes),
+    payShowQr: d.payShowQr, payShowCopy: d.payShowCopy, payShowPhone: d.payShowPhone, payShowApps: d.payShowApps,
   });
   const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [k]: e.target.value });
@@ -126,6 +127,20 @@ function Settings({ onClose }: { onClose: () => void }) {
             <Field label="Name shown in the UPI app" hint="Blank uses the shop name"><input className={inputCls} value={form.upiName} maxLength={60} onChange={set("upiName")} /></Field>
             <Field label="GPay / PhonePe number (optional)" hint="Shown next to the UPI ID so customers can also pay by typing this number in GPay. 10 digits."><input className={inputCls} inputMode="numeric" value={form.upiPhone} maxLength={14} onChange={set("upiPhone")} placeholder="98765 43210" /></Field>
             <Field label="Change the QR every (minutes)" hint="A fresh QR replaces the old one on the guest's screen"><input className={inputCls} type="number" min={1} max={30} inputMode="numeric" value={form.upiQrMinutes} onChange={set("upiQrMinutes")} /></Field>
+            <div className="space-y-2 border-t border-slate-200 pt-3">
+              <b className="block text-[12.5px] text-slate-900">What the WhatsApp payment page shows</b>
+              {([
+                ["payShowQr", "QR to scan"],
+                ["payShowCopy", "Copy UPI ID"],
+                ["payShowPhone", "GPay / PhonePe number"],
+                ["payShowApps", "Open GPay / PhonePe / Paytm buttons"],
+              ] as const).map(([k, label]) => (
+                <div key={k} className="flex items-center justify-between gap-3">
+                  <span className="text-[13px] text-slate-700">{label}</span>
+                  <Switch on={form[k]} onChange={(v) => setForm({ ...form, [k]: v })} label={label} />
+                </div>
+              ))}
+            </div>
           </div>
           <Field label="Logo" hint="Upload a PNG or JPG, or paste an image link. Blank uses the built-in icon.">
             <div className="space-y-2">

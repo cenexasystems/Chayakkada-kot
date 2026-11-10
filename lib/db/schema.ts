@@ -46,6 +46,11 @@ export const settings = pgTable("settings", {
   /** the shop's GPay / PhonePe mobile number — shown as another way to pay (blank = not shown) */
   upiPhone: text("upi_phone").notNull().default(""),
   upiQrMinutes: integer("upi_qr_minutes").notNull().default(5),
+  /** what the WhatsApp payment page shows: the QR, the copy-UPI-ID box, the GPay number, the open-an-app buttons */
+  payShowQr: boolean("pay_show_qr").notNull().default(true),
+  payShowCopy: boolean("pay_show_copy").notNull().default(true),
+  payShowPhone: boolean("pay_show_phone").notNull().default(true),
+  payShowApps: boolean("pay_show_apps").notNull().default(true),
 });
 
 /** Single row (id = 1): the change counter the admin panel polls, and the order-number sequence. */
