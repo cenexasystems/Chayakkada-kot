@@ -235,7 +235,7 @@ export default function CakeLab() {
 
   /* ---------- WhatsApp order ---------- */
   const lines = [
-    "Hi Chef Loving Cakes! I'd love to order a cake 🎂",
+    "Hi Chayakkada! I'd love to order a cake 🎂",
     `• Occasion: ${cfg.occasion}`,
     `• Tiers: ${cfg.tiers}`,
     `• Sponge: ${sponge.label}`,

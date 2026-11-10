@@ -357,7 +357,7 @@ export default function AnalyticsPage() {
         ],
       },
     ];
-    downloadExcel(`chef-loving-analytics-${periodLabel}-${new Date().toISOString().slice(0, 10)}`, sheets);
+    downloadExcel(`chayakkada-analytics-${periodLabel}-${new Date().toISOString().slice(0, 10)}`, sheets);
   };
 
   return (

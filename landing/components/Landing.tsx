@@ -63,7 +63,7 @@ export default function Landing({ table, tables }: { table?: { label: string; co
       <div className="loader" aria-hidden="true">
         <div className="loader__inner">
           <svg className="loader__word" viewBox="0 0 600 140">
-            <text x="300" y="100" textAnchor="middle">Chef Loving</text>
+            <text x="300" y="100" textAnchor="middle">Chayakkada</text>
           </svg>
           <div className="loader__oven">
             <span>Preheating</span>
@@ -77,10 +77,10 @@ export default function Landing({ table, tables }: { table?: { label: string; co
 
       {/* ===================== NAV ===================== */}
       <header className="nav" data-nav>
-        <a href="#top" className="brand" aria-label="Chef Loving Cakes — home">
+        <a href="#top" className="brand" aria-label="Chayakkada — home">
           <Cherry size={26} />
           <span className="brand__name">
-            <em>Chef Loving</em>
+            <em>Chayakkada</em>
             <small>Cakes · Kodaikanal</small>
           </span>
         </a>
@@ -132,7 +132,7 @@ export default function Landing({ table, tables }: { table?: { label: string; co
         </nav>
         <div className="mmenu__foot">
           <a href="tel:+918056895352">+91 80568 95352</a>
-          <a href="https://instagram.com/cheflovingcakes" target="_blank" rel="noopener noreferrer">@cheflovingcakes</a>
+          <a href="https://instagram.com/chayakkada" target="_blank" rel="noopener noreferrer">@chayakkada</a>
         </div>
       </div>
 
@@ -147,10 +147,10 @@ export default function Landing({ table, tables }: { table?: { label: string; co
             </div>
 
             <h1 className="masthead">
-              <span className="sr-only">Chef Loving Cakes — handmade cakes in Kodaikanal</span>
-              <span className="mast__l" aria-hidden="true"><Letters text="Chef" /></span>
+              <span className="sr-only">Chayakkada — handmade cakes in Kodaikanal</span>
+              <span className="mast__l" aria-hidden="true"><Letters text="Chaya" /></span>
               <span className="mast__gap" aria-hidden="true"> </span>
-              <span className="mast__r" aria-hidden="true"><Letters text="Loving" from={4} /></span>
+              <span className="mast__r" aria-hidden="true"><Letters text="kkada" from={5} /></span>
             </h1>
 
             <p className="cover__after" aria-hidden="true">
@@ -336,7 +336,7 @@ export default function Landing({ table, tables }: { table?: { label: string; co
                 <h2 className="h-xl" data-reveal="split">
                   <Split text="Baked" /> <em><Split text="slowly," from={1} /></em> <Split text="since 2015." from={2} />
                 </h2>
-                <p className="story__sig" data-reveal="fade">— the Chef Loving family</p>
+                <p className="story__sig" data-reveal="fade">— the Chayakkada family</p>
               </div>
               <p className="story__read" data-progress="read" style={{ "--n": storyWords.length } as CSSVars}>
                 {storyWords.map((w, i) => (
@@ -427,10 +427,10 @@ export default function Landing({ table, tables }: { table?: { label: string; co
                   </figcaption>
                 </figure>
               ))}
-              <a className="gal__end" href="https://instagram.com/cheflovingcakes" target="_blank" rel="noopener noreferrer" data-cursor="Follow">
+              <a className="gal__end" href="https://instagram.com/chayakkada" target="_blank" rel="noopener noreferrer" data-cursor="Follow">
                 <Insta size={34} />
                 <span>More on Instagram</span>
-                <b>@cheflovingcakes</b>
+                <b>@chayakkada</b>
               </a>
             </div>
           </div>
@@ -455,15 +455,15 @@ export default function Landing({ table, tables }: { table?: { label: string; co
                 <div className="receipt" data-reveal="print">
                   <div className="receipt__head">
                     <Cherry size={30} />
-                    <b>CHEF LOVING CAKES</b>
+                    <b>CHAYAKKADA</b>
                     <span>Observatory Rd, Near BSNL Office</span>
                     <span>Kodaikanal, Tamil Nadu — 624101</span>
                   </div>
                   <div className="receipt__rule" />
                   <dl className="receipt__rows">
                     <div><dt>Call / WhatsApp</dt><dd><a href="tel:+918056895352">+91 80568 95352</a></dd></div>
-                    <div><dt>Email</dt><dd><a href="mailto:cheflovingcakes@gmail.com">cheflovingcakes@gmail.com</a></dd></div>
-                    <div><dt>Instagram</dt><dd><a href="https://instagram.com/cheflovingcakes" target="_blank" rel="noopener noreferrer">@cheflovingcakes</a></dd></div>
+                    <div><dt>Email</dt><dd><a href="mailto:eightistotwo@gmail.com">eightistotwo@gmail.com</a></dd></div>
+                    <div><dt>Instagram</dt><dd><a href="https://instagram.com/chayakkada" target="_blank" rel="noopener noreferrer">@chayakkada</a></dd></div>
                     <div><dt>Proprietor</dt><dd>Venkadesan Bose</dd></div>
                   </dl>
                   <div className="receipt__rule" />
@@ -483,7 +483,7 @@ export default function Landing({ table, tables }: { table?: { label: string; co
                 <div className="stampwrap" data-reveal="scale">
                   <div className="stamp">
                     <iframe
-                      title="Chef Loving Cakes location — Observatory Rd, Kodaikanal"
+                      title="Chayakkada location — Observatory Rd, Kodaikanal"
                       src="https://www.google.com/maps?q=Observatory+Road,+Kodaikanal,+Tamil+Nadu+624101&output=embed"
                       loading="lazy"
                       referrerPolicy="no-referrer-when-downgrade"
@@ -535,15 +535,15 @@ export default function Landing({ table, tables }: { table?: { label: string; co
               <div>
                 <h5>Say hello</h5>
                 <a href="tel:+918056895352"><Phone size={14} /> +91 80568 95352</a>
-                <a href="mailto:cheflovingcakes@gmail.com"><Mail size={14} /> cheflovingcakes@gmail.com</a>
-                <a href="https://instagram.com/cheflovingcakes" target="_blank" rel="noopener noreferrer"><Insta size={14} /> @cheflovingcakes</a>
+                <a href="mailto:eightistotwo@gmail.com"><Mail size={14} /> eightistotwo@gmail.com</a>
+                <a href="https://instagram.com/chayakkada" target="_blank" rel="noopener noreferrer"><Insta size={14} /> @chayakkada</a>
               </div>
             </div>
           </div>
         </div>
 
         <div className="foot__word" data-reveal="split" aria-hidden="true">
-          <Letters text="Chef Loving" />
+          <Letters text="Chayakkada" />
         </div>
 
         <div className="hills" aria-hidden="true">
@@ -557,7 +557,7 @@ export default function Landing({ table, tables }: { table?: { label: string; co
         </div>
 
         <div className="foot__base">
-          <span>© 2026 Chef Loving Cakes</span>
+          <span>© 2026 Chayakkada</span>
           <span>Handmade with love in Kodaikanal</span>
         </div>
       </footer>

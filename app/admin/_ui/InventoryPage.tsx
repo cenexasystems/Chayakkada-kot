@@ -394,8 +394,8 @@ export default function InventoryPage() {
       {
         name: "Products",
         rows: [
-          ["Name", "Category", "Price", "Stock", "Low-stock alert at", "Status", "Loyalty points / item", "On menu", "Description"],
-          ...s.products.map((p) => [p.name, p.category, p.price, p.stock === null ? "Not tracked" : p.stock, p.stock === null ? "" : p.lowAt, p.stock === null ? "Always available" : p.stock <= 0 ? "Sold out" : p.stock <= p.lowAt ? "Low" : "In stock", p.loyaltyPoints === null ? "Automatic" : p.loyaltyPoints, p.active ? "Yes" : "No", p.description]),
+          ["Name", "Product", "Variant", "Category", "Price", "Stock", "Low-stock alert at", "Status", "Loyalty points / item", "On menu", "Description"],
+          ...s.products.map((p) => [p.name, p.family || p.name, p.variant, p.category, p.price, p.stock === null ? "Not tracked" : p.stock, p.stock === null ? "" : p.lowAt, p.stock === null ? "Always available" : p.stock <= 0 ? "Sold out" : p.stock <= p.lowAt ? "Low" : "In stock", p.loyaltyPoints === null ? "Automatic" : p.loyaltyPoints, p.active ? "Yes" : "No", p.description]),
         ],
       },
     ]);
@@ -847,7 +847,7 @@ export default function InventoryPage() {
         }
       >
         {form && (
-          <div className="grid gap-5 md:grid-cols-[1fr_220px]">
+          <div className={cx("grid gap-5", !form.hasVar && "md:grid-cols-[1fr_220px]")}>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Name *" className="sm:col-span-2">
                 <input className={inputCls} value={form.name} maxLength={60} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={form.hasVar ? "Popcorn" : "Crispy Veg Burger"} />
@@ -941,50 +941,53 @@ export default function InventoryPage() {
                     const auto = pointsPerUnit({ id: r.id ?? "", category: form.category, price: Number(r.price) || 0, loyaltyPoints: null }, s.loyaltyEarn);
                     return (
                       <div key={r.id ?? `n${k}`} className="rounded-2xl border border-slate-200 bg-white p-4">
-                        <div className="flex items-start gap-3">
-                          <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2">
-                            <Field label="Variant name *">
-                              <input className={inputCls} value={r.name} maxLength={40} placeholder={["Small", "Regular", "Large"][k] ?? "Name"} onChange={(e) => upd({ name: e.target.value })} />
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <b className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Variant {k + 1}</b>
+                          <Btn size="sm" kind="plain" className="text-red-600 hover:bg-red-50" disabled={form.vrows.length <= 1} onClick={() => setForm({ ...form, vrows: form.vrows.filter((_, n) => n !== k) })} aria-label={`Remove ${r.name || "variant"}`}>
+                            <Icon name="trash" size={14} /> Remove
+                          </Btn>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-12">
+                          <Field label="Variant name *" className="col-span-2 sm:col-span-5">
+                            <input className={inputCls} value={r.name} maxLength={40} placeholder={["Small", "Regular", "Large"][k] ?? "Name"} onChange={(e) => upd({ name: e.target.value })} />
+                          </Field>
+                          <Field label="Price (₹) *" className="sm:col-span-3">
+                            <input className={inputCls} type="number" min={0} step="0.5" value={r.price} onChange={(e) => upd({ price: e.target.value })} />
+                          </Field>
+                          {role === "admin" ? (
+                            <Field label="Loyalty points" className="sm:col-span-4" hint={r.price ? `Blank = automatic (${auto} pts)` : "Blank = automatic"}>
+                              <input className={inputCls} type="number" min={0} step={1} inputMode="numeric" placeholder={r.price ? `Automatic (${auto})` : "Automatic"} value={r.points} onChange={(e) => upd({ points: e.target.value })} />
                             </Field>
-                            <Field label="Price (₹) *">
-                              <input className={inputCls} type="number" min={0} step="0.5" value={r.price} onChange={(e) => upd({ price: e.target.value })} />
-                            </Field>
-                            <div className="rounded-xl border border-slate-100 p-3 sm:col-span-2">
-                              <div className="flex items-center justify-between gap-3">
-                                <b className="text-[12.5px] text-slate-800">Track stock</b>
-                                <Switch on={r.track} onChange={(v) => upd({ track: v })} label={`Track stock for ${r.name || "this variant"}`} />
-                              </div>
-                              {r.track && (
-                                <div className="mt-3 grid grid-cols-2 gap-3">
-                                  <Field label="In stock now">
-                                    <input className={inputCls} type="number" min={0} value={r.stock} onChange={(e) => upd({ stock: e.target.value })} />
-                                  </Field>
-                                  <Field label="Low-stock alert at">
-                                    <input className={inputCls} type="number" min={0} value={r.lowAt} onChange={(e) => upd({ lowAt: e.target.value })} />
-                                  </Field>
-                                </div>
-                              )}
+                          ) : (
+                            <p className="col-span-2 self-end rounded-xl bg-slate-50 px-3 py-2.5 text-[12px] text-slate-500 sm:col-span-4">Loyalty points are set by the admin.</p>
+                          )}
+                          <Field label="Track stock" className={r.track ? "sm:col-span-3" : "sm:col-span-6"}>
+                            <div className={cx(inputCls, "flex items-center justify-between gap-3")}>
+                              <span className="text-[12.5px] text-slate-600">{r.track ? "On" : "Off — never sells out"}</span>
+                              <Switch on={r.track} onChange={(v) => upd({ track: v })} label={`Track stock for ${r.name || "this variant"}`} />
                             </div>
-                            {role === "admin" ? (
-                              <Field label="Loyalty points" hint={`Blank = automatic${r.price ? ` (${auto} pts)` : ""}`}>
-                                <input className={inputCls} type="number" min={0} step={1} inputMode="numeric" placeholder={r.price ? `Automatic (${auto})` : "Automatic"} value={r.points} onChange={(e) => upd({ points: e.target.value })} />
+                          </Field>
+                          {r.track && (
+                            <>
+                              <Field label="In stock now" className="sm:col-span-3">
+                                <input className={inputCls} type="number" min={0} value={r.stock} onChange={(e) => upd({ stock: e.target.value })} />
                               </Field>
-                            ) : (
-                              <p className="self-end rounded-xl bg-slate-50 px-3 py-2.5 text-[12px] text-slate-500">Loyalty points are set by the admin.</p>
-                            )}
-                            <label className="flex cursor-pointer items-center justify-between gap-3 self-end rounded-xl border border-slate-100 px-3 py-2.5 text-[13px] font-semibold text-slate-700">
-                              Show on menu
+                              <Field label="Low-stock alert at" className="sm:col-span-3">
+                                <input className={inputCls} type="number" min={0} value={r.lowAt} onChange={(e) => upd({ lowAt: e.target.value })} />
+                              </Field>
+                            </>
+                          )}
+                          <Field label="Show on menu" className={r.track ? "sm:col-span-3" : "sm:col-span-6"}>
+                            <div className={cx(inputCls, "flex items-center justify-between gap-3")}>
+                              <span className="text-[12.5px] text-slate-600">{r.active ? "Visible" : "Hidden"}</span>
                               <Switch on={r.active} onChange={(v) => upd({ active: v })} label={`Show ${r.name || "this variant"} on the menu`} />
-                            </label>
-                            <Field label="Image" className="sm:col-span-2">
+                            </div>
+                          </Field>
+                          <div className="col-span-2 flex items-start gap-3 sm:col-span-12">
+                            <div className="grid h-[84px] w-[84px] shrink-0 place-items-center overflow-hidden rounded-xl bg-slate-100">{r.image ? <img src={r.image} alt="" className="h-full w-full object-cover" /> : <span className="text-[11px] text-slate-400">No image</span>}</div>
+                            <Field label="Image" className="min-w-0 flex-1">
                               <ImageField value={r.image} onChange={(v) => upd({ image: v })} />
                             </Field>
-                          </div>
-                          <div className="flex w-24 shrink-0 flex-col items-center gap-2">
-                            <div className="aspect-square w-full overflow-hidden rounded-xl bg-slate-100">{r.image ? <img src={r.image} alt="" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center text-[11px] text-slate-400">No image</span>}</div>
-                            <Btn size="sm" kind="plain" className="text-red-600 hover:bg-red-50" disabled={form.vrows.length <= 1} onClick={() => setForm({ ...form, vrows: form.vrows.filter((_, n) => n !== k) })} aria-label={`Remove ${r.name || "variant"}`}>
-                              <Icon name="trash" size={14} /> Remove
-                            </Btn>
                           </div>
                         </div>
                       </div>
