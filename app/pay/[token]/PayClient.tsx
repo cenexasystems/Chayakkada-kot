@@ -9,7 +9,7 @@ import { mmss, spacedPhone, useUpiQr } from "@/app/_components/upiQr";
    shop's UPI ID; the QR is renewed every few minutes. Nothing here confirms a payment — the counter checks
    their UPI app — so it asks the customer to show the payment confirmation. */
 export function PayClient({ amount, name, shop, logoUrl, upi }: { amount: number; name: string; shop: string; logoUrl: string; upi: { id: string; name: string; minutes: number; phone: string } }) {
-  const { link, ref, left, ready } = useUpiQr(upi, amount, shop, "W");
+  const { link, ref, left, ready, apps } = useUpiQr(upi, amount, shop, "W");
   const [copied, setCopied] = useState("");
   const copy = async (what: string, v: string) => {
     try {
@@ -31,8 +31,19 @@ export function PayClient({ amount, name, shop, logoUrl, upi }: { amount: number
           <p className="mt-1 text-[44px] font-black leading-none">{rupee(amount)}</p>
         </div>
         <div className="space-y-4 p-6 text-center">
-          <a href={ready ? link : undefined} aria-disabled={!ready} className="inline-flex h-12 w-full items-center justify-center rounded-xl bg-[#6b7550] text-[15px] font-bold text-white hover:bg-[#576141] aria-disabled:opacity-50">
-            Open my UPI app
+          <p className="text-[12.5px] font-semibold text-slate-600">
+            Pay {rupee(amount)} to {upi.name} ({upi.id}) with:
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {apps.slice(0, 3).map((a) => (
+              <a key={a.name} href={a.href} className="inline-flex h-12 items-center justify-center rounded-xl bg-[#6b7550] px-1 text-[13px] font-bold text-white hover:bg-[#576141]">
+                {a.name}
+              </a>
+            ))}
+            {!ready && <span className="col-span-3 h-12" aria-hidden="true" />}
+          </div>
+          <a href={ready ? link : undefined} aria-disabled={!ready} className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-[#6b7550] text-[13px] font-bold text-[#576141] aria-disabled:opacity-50">
+            Other UPI app
           </a>
           <div className="mx-auto w-52 rounded-2xl border border-slate-200 bg-white p-2">{ready ? <Qr text={link} className="block h-auto w-full" /> : <div className="aspect-square w-full" aria-hidden="true" />}</div>
           <p className="text-[12.5px] text-slate-500">

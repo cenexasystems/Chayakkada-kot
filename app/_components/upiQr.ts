@@ -36,6 +36,18 @@ export function useUpiQr(upi: { id: string; name: string; minutes: number; phone
   const period = Math.max(1, upi.minutes) * 60_000;
   const left = ready ? Math.ceil((period - (now % period)) / 1000) : 0;
   const ref = ready ? `${tag}${(Math.floor(now / period) * period).toString(36).toUpperCase().slice(-6)}` : "";
-  const link = ready ? `upi://pay?pa=${enc(upi.id)}&pn=${enc(upi.name)}&am=${amount.toFixed(2)}&cu=INR&tn=${enc(`${shop} ${ref}`.slice(0, 40))}&tr=${enc(ref)}` : "";
-  return { link, ref, left, ready };
+  /* No `tr` (transaction reference): GPay/PhonePe treat it as a merchant payment and decline it for a personal UPI ID.
+     The reference rides in the note (`tn`) instead. */
+  const query = `pa=${enc(upi.id)}&pn=${enc(upi.name)}&am=${amount.toFixed(2)}&cu=INR&tn=${enc(`${shop} ${ref}`.slice(0, 40))}`;
+  const link = ready ? `upi://pay?${query}` : "";
+  /* the same payment, opened straight in one app (the payee is the shop's saved UPI ID) */
+  const apps = ready
+    ? [
+        { name: "Google Pay", href: `tez://upi/pay?${query}` },
+        { name: "PhonePe", href: `phonepe://pay?${query}` },
+        { name: "Paytm", href: `paytmmp://pay?${query}` },
+        { name: "Any UPI app", href: link },
+      ]
+    : [];
+  return { link, ref, left, ready, apps };
 }
