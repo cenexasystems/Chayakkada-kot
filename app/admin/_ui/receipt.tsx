@@ -51,7 +51,9 @@ const ROLL_MM = { 2: [58, 48], 3: [80, 72] } as const;
 
 const pageCss = (f: PrintFormat) =>
   f.kind === "thermal"
-    ? `@page{size:${ROLL_MM[f.roll][0]}mm 297mm;margin:2mm 0}`
+    ? /* the page is the printable strip (72mm on an 80mm roll), the paper size thermal drivers use; an 80mm page on
+         72mm paper loses 8mm off the right edge */
+      `@page{size:${ROLL_MM[f.roll][1]}mm 297mm;margin:2mm 0}`
     : `@page{size:${f.size};margin:${f.size === "A3" ? 16 : f.size === "A4" ? 12 : 8}mm}`;
 
 /** The shop's printed header lines, built from Settings. */
