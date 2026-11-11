@@ -228,7 +228,8 @@ export function Kpi({ label, value, hint, icon, tone = "emerald", small, details
             <Icon name={icon} size={14} stroke={2.4} />
           </span>
         </div>
-        <div className={cx("adm-num mt-2 truncate font-extrabold text-slate-900", small ? "text-[19px]" : "text-[23px]")} title={typeof value === "string" ? value : undefined}>
+        {/* a big amount (₹1,23,456.50) steps its size down instead of being cut off with "…" */}
+        <div className={cx("adm-num mt-2 truncate font-extrabold text-slate-900", (() => { const n = typeof value === "string" ? value.length : 0; return n > 12 ? "text-[15px]" : n > 9 ? (small ? "text-[16px]" : "text-[18px]") : small ? "text-[19px]" : "text-[23px]"; })())} title={typeof value === "string" ? value : undefined}>
           {value}
         </div>
         {hint && <p className="mt-1.5 truncate text-[11px] text-slate-400">{hint}</p>}
