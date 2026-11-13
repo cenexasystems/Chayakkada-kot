@@ -124,7 +124,7 @@ export default function CouponsPage() {
         Coupon discount applies to the product subtotal only — not extra charges or GST. Guests can enter a code from their phone; staff can apply one in Billing.
       </p>
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         {/* ---------- new / edit ---------- */}
         <section className="scroll-mt-4 rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_2px_12px_-4px_rgba(15,23,42,.1)] sm:p-8">
           <div className="mb-6 flex items-center justify-between gap-3">

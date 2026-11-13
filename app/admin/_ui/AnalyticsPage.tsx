@@ -431,7 +431,7 @@ export default function AnalyticsPage() {
             <Kpi label="GST rates used" value={gstr.rates.length ? gstr.rates.map((r) => `${r.rate}%`).join(", ") : "—"} hint={`${gstr.rates.length} rate${gstr.rates.length === 1 ? "" : "s"} in this period`} icon="sliders" tone="amber" small />
           </div>
 
-          <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+          <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
             <Card title="GST by rate" right={<span className="text-[12px] text-slate-500">CGST + SGST shown separately</span>}>
               <GstByRate rates={gstr.rates} />
             </Card>
@@ -585,7 +585,7 @@ export default function AnalyticsPage() {
             />
             <Kpi label="Today's avg order value" value={rupee(Math.round(tsum.aov))} hint="Per invoice today" icon="zap" tone="orange" />
           </div>
-          <div className="grid gap-5 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
             <Card
               className="xl:col-span-2"
               title={<span className="text-[14px] uppercase tracking-[0.14em] text-slate-900">Today&apos;s transactions</span>}
@@ -656,7 +656,7 @@ export default function AnalyticsPage() {
 
       {/* ============ COUPONS ============ */}
       {tab === "coupons" && (
-        <div className="adm-in grid gap-5 xl:grid-cols-[minmax(300px,380px)_1fr]">
+        <div className="adm-in grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(300px,380px)_minmax(0,1fr)]">
           <Card title="Discount Summary">
             <div className="space-y-4">
               {[

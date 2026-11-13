@@ -145,7 +145,7 @@ export default function ExpensesPage() {
         <Kpi label="Entries" value={st.count} hint="Matching the filters" icon="list" tone="sky" />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
         <Card title="Expense log">
           {!st.rows.length ? (
             <Empty icon="bag" title={s.expenses.length ? "No expenses match" : "No expenses yet"}>
